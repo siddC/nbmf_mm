@@ -170,3 +170,21 @@ def test_sparse_inputs():
         random_state=0,
     ).fit(Xs, mask=Ms)
     assert m.W_.shape == (X.shape[0], 4)
+
+def test_objective_not_increasing_with_normalize_projection_beta_dir():
+    """Monotone MAP descent under 'normalize' for the other orientation."""
+    X = _toy_data()
+    model = NBMF(
+        n_components=5,
+        orientation="beta-dir",
+        max_iter=120,
+        tol=1e-7,
+        use_numexpr=False,
+        use_numba=False,
+        projection_method="normalize",
+        projection_backend="numpy",
+        random_state=0,
+    )
+    model.fit(X)
+    hist = np.asarray(model.objective_history_, dtype=float)
+    assert np.all(hist[1:] <= hist[:-1] + 1e-8)
