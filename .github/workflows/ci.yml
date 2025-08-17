@@ -2,41 +2,89 @@ name: CI
 
 on:
   push:
-    branches: [ master, main ]
   pull_request:
-    branches: [ master, main ]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
+    name: test (py${{ matrix.python }})
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ['3.9', '3.10', '3.11', '3.12']
+        python: ["3.9", "3.10", "3.11", "3.12"]
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
-      - name: Install package + dev deps
+          python-version: ${{ matrix.python }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install package + dev deps (fast)
+        shell: bash
         run: |
-          python -m pip install -U pip wheel
-          pip install -e ".[dev,sklearn]"
+          set -euxo pipefail
+          # Prefer extras if present, otherwise fall back to explicit deps.
+          uv pip install -e ".[dev]" || {
+            uv pip install -e .
+            uv pip install pytest pytest-cov ruff mypy scikit-learn numexpr numba
+          }
+
       - name: Run tests
-        run: |
-          pytest -q --disable-warnings --maxfail=1
-  build:
-    needs: test
+        run: pytest -q --disable-warnings --maxfail=1
+
+  pixi:
+    name: pixi env smoke test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pixi
+        uses: prefix-dev/setup-pixi@v0
+
+      - name: Solve env
+        run: pixi install
+
+      - name: Run tests (pixi)
+        run: pixi run test
+
+  build:
+    name: build sdist+wheel
+    needs: [test, pixi]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-      - name: Build sdist/wheel
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Build
+        run: uv build
+
+      - name: Check metadata (twine)
         run: |
-          pip install build
-          python -m build
-      - uses: actions/upload-artifact@v4
+          python -m pip install --upgrade twine
+          twine check dist/*
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
         with:
           name: dist
-          path: dist
+          path: dist/*
