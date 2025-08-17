@@ -18,7 +18,13 @@ Supports two symmetric orientations of the Bernoulli mean factorization X̂ = W 
 An optional binary mask allows training for matrix-completion protocols by ignoring
 left-out entries in the likelihood and updates.
 
-Scikit-learn-style estimator: BernoulliNMF_MM(BaseEstimator, TransformerMixin)
+We log the MAP objective (NLL + negative Beta log-prior) in objective_history_.
+
+Projection choices:
+- "normalize": multiplicative update + L1 renormalization for the simplex
+               (MM-faithful; guarantees monotone decrease of the MAP objective).
+- "duchi":     Euclidean projection to the simplex (fast default; not strictly
+               MM-monotone).
 
 References:
   - P. Magron & C. Févotte (2022), A majorization-minimization algorithm for
@@ -31,7 +37,6 @@ from __future__ import annotations
 
 from typing import Optional, Tuple
 import warnings
-
 import numpy as np
 
 # Optional acceleration for elementwise expressions
@@ -126,8 +131,7 @@ def _safe_div(num, den, eps=1e-12):
     return num / (den + eps)
 
 
-# -------- Simplex projections -------------------------------------------------
-# Euclidean projection (Duchi et al., 2008) for the "duchi" path
+# -------- Simplex projections ("duchi") ---------------------------------------
 
 def _project_rows_simplex_numpy_impl(W: np.ndarray) -> np.ndarray:
     M, K = W.shape
@@ -178,7 +182,8 @@ else:
     _project_cols_simplex_numba_impl = _project_cols_simplex_numpy_impl
 
 
-# “normalize”: nonnegativity + L1 renormalization helpers (used in fast path too)
+# -------- L1 renormalization helpers ("normalize") ----------------------------
+
 def _normalize_rows_simplex(W: np.ndarray) -> np.ndarray:
     W = np.maximum(W, 0.0)
     s = W.sum(axis=1, keepdims=True)
@@ -266,7 +271,7 @@ class BernoulliNMF_MM(BaseEstimator, TransformerMixin):
         self.dtype = dtype
         self.verbose = verbose
 
-    # ---- projection selectors -------------------------------------------------
+    # ---- projection selector -------------------------------------------------
 
     def _select_projection_ops(self):
         method = self.projection_method
@@ -276,7 +281,7 @@ class BernoulliNMF_MM(BaseEstimator, TransformerMixin):
             raise ValueError('projection_method must be "duchi" or "normalize".')
 
         if method == "normalize":
-            # we use closed-forms; these helpers are only for safety/fast path
+            # closed-form + L1 renormalization; helpers retained for safety
             self._proj_rows = _normalize_rows_simplex
             self._proj_cols = _normalize_cols_simplex
             return
@@ -304,7 +309,7 @@ class BernoulliNMF_MM(BaseEstimator, TransformerMixin):
         else:
             raise ValueError("projection_backend must be 'auto', 'numba', or 'numpy'.")
 
-    # ---- math helpers ---------------------------------------------------------
+    # ---- math helpers --------------------------------------------------------
 
     def _stats(self, X, V, mask):
         # R1 = (M*X)/V ; R0 = (M*(1-X))/(1-V)
@@ -334,27 +339,28 @@ class BernoulliNMF_MM(BaseEstimator, TransformerMixin):
         H = _safe_div(C, C + D)
         return np.clip(H, 1e-9, 1.0 - 1e-9)
 
-def _update_beta_W_mm(self, W, H, R1, R0):
-    a, b = float(self.alpha), float(self.beta)
-    C = W * (R1 @ H.T) + (a - 1.0)
-    D = (1.0 - W) * (R0 @ H.T) + (b - 1.0)  # ✅ correct: absence term uses H when H is simplex
-    W = _safe_div(C, C + D)
-    return np.clip(W, 1e-9, 1.0 - 1e-9)
+    def _update_beta_W_mm(self, W, H, R1, R0):
+        # dir-beta orientation: H is the simplex factor
+        # W <- ( W ⊙ (R1 H^T) + (α-1) ) / ( ... + (1-W) ⊙ (R0 H^T) + (β-1) )
+        a, b = float(self.alpha), float(self.beta)
+        C = W * (R1 @ H.T) + (a - 1.0)
+        D = (1.0 - W) * (R0 @ H.T) + (b - 1.0)   # NOTE: uses H, not (1-H)
+        W = _safe_div(C, C + D)
+        return np.clip(W, 1e-9, 1.0 - 1e-9)
 
     def _update_simplex_W_mm(self, W, H, R1, R0, M_size, N_size):
-        # Paper (Alg.1): W <- W ⊙ (R1 H^T + R0 (1-H)^T) / N
-        # We divide by N explicitly; in masked setups we additionally renormalize rows.
+        # W <- row-normalize( W ⊙ (R1 H^T + R0 (1-H)^T) / N )
         mult = (R1 @ H.T) + (R0 @ (1.0 - H).T)
         W = W * _safe_div(mult, N_size)
         return _normalize_rows_simplex(W)
 
     def _update_simplex_H_mm(self, H, W, R1, R0, M_size, N_size):
-        # Symmetric of Alg.1 for col-simplex H: H <- H ⊙ (W^T R1 + (1-W)^T R0) / M
+        # H <- col-normalize( H ⊙ (W^T R1 + (1-W)^T R0) / M )
         mult = (W.T @ R1) + ((1.0 - W).T @ R0)
         H = H * _safe_div(mult, M_size)
         return _normalize_cols_simplex(H)
 
-    # ---- public API -----------------------------------------------------------
+    # ---- public API ----------------------------------------------------------
 
     def fit(self, X, y=None, *, mask=None):
         """
@@ -386,21 +392,14 @@ def _update_beta_W_mm(self, W, H, R1, R0):
                 R1, R0 = self._stats(X, V, mask)
 
                 if self.orientation == "beta-dir":
-                    # H: Beta prior (Alg.1 Eqs. 14–16)
                     H = self._update_beta_H_mm(H, W, R1, R0)
-
-                    # W: row-simplex
                     if self.projection_method == "normalize":
                         W = self._update_simplex_W_mm(W, H, R1, R0, M, N)
-                    else:  # "duchi" fast path
+                    else:
                         W = W * ((R1 @ H.T) + (R0 @ (1.0 - H).T))
                         W = self._proj_rows(W)
-
-                else:  # "dir-beta"
-                    # W: Beta prior (symmetric)
+                else:
                     W = self._update_beta_W_mm(W, H, R1, R0)
-
-                    # H: col-simplex
                     if self.projection_method == "normalize":
                         H = self._update_simplex_H_mm(H, W, R1, R0, M, N)
                     else:
