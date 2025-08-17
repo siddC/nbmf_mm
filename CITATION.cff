@@ -1,0 +1,35 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite these works."
+title: "NBMF-MM: Mean-parameterized Bernoulli (Binary) Matrix Factorization via MM"
+authors:
+  - family-names: "Chauhan"
+    given-names: "Siddharth"
+repository-code: "https://github.com/siddC/nbmf_mm"
+preferred-citation:
+  type: software
+  title: "NBMF-MM"
+  authors:
+    - family-names: "Chauhan"
+      given-names: "Siddharth"
+  year: 2025
+references:
+  - type: article
+    title: "A majorization-minimization algorithm for nonnegative binary matrix factorization"
+    authors:
+      - family-names: Magron
+        given-names: Paul
+      - family-names: Févotte
+        given-names: Cédric
+    year: 2022
+    url: "https://arxiv.org/abs/2204.09741"
+  - type: article
+    title: "Bayesian Mean-parameterized Nonnegative Binary Matrix Factorization"
+    authors:
+      - family-names: Lumbreras
+        given-names: Alberto
+      - family-names: Filstroff
+        given-names: Louis
+      - family-names: Févotte
+        given-names: Cédric
+    year: 2018
+    url: "https://arxiv.org/abs/1812.06866"
