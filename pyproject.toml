@@ -1,50 +1,67 @@
 [build-system]
-requires = ["setuptools>=75", "setuptools-scm>=8"]
+requires = ["setuptools>=68", "setuptools-scm>=8", "wheel", "numpy>=1.22"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "nbmf-mm"
-dynamic = ["version"]                           # from setuptools_scm
-description = "Bernoulli mean-parameterized NMF (NBMF) with Majorization–Minimization (NBMF‑MM)"
-readme = {file = "README.md", content-type = "text/markdown"}
-requires-python = ">=3.9"
-license = {text = "MIT"}
-authors = [{ name = "Siddharth M. Chauhan", email = "github.chauhan.siddharth@gmail.com" }]
+description = "Bernoulli (binary) mean-parameterized NMF (NBMF) with Majorization–Minimization (NBMF-MM)."
+readme = { file = "README.md", content-type = "text/markdown" }
+requires-python = ">=3.9,<3.13"
+license = { file = "LICENSE" }
+authors = [{ name = "Project contributors" }]
+keywords = ["nmf", "matrix factorization", "bernoulli", "mm", "probabilistic", "dirichlet"]
 classifiers = [
+  "Development Status :: 4 - Beta",
   "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
-  "Intended Audience :: Science/Research",
-  "Topic :: Scientific/Engineering :: Artificial Intelligence",
   "Topic :: Scientific/Engineering :: Information Analysis",
-  "Topic :: Scientific/Engineering :: Bio-Informatics",
+  "Intended Audience :: Science/Research",
 ]
+# We derive the version from git tags via setuptools_scm.
+dynamic = ["version"]
+
+# Runtime dependencies. Keep this minimal & stable.
 dependencies = [
   "numpy>=1.22",
-  "scipy>=1.8",
-  "scikit-learn>=1.3",
+  "scipy>=1.9",
+  "numexpr>=2.8"
 ]
 
 [project.optional-dependencies]
-accel = [
-  "numexpr>=2.8",
-  "numba>=0.57; python_version < '3.12'",  # don’t block Py3.12
+# Used by tests and development (CI runs `.[dev]` or pixi installs these)
+dev = [
+  "pytest>=7",
+  "pytest-cov>=4",
+  "ruff>=0.5",
+  "mypy>=1.7",
+  "build>=1",
+  "twine>=5",               # only needed for token-based publishing
+  "setuptools-scm>=8",
+]
+docs = [
+  "sphinx>=7",
+  "furo",
 ]
 
 [project.urls]
-Homepage = "https://github.com/<org-or-user>/nbmf_mm"
-Issues   = "https://github.com/<org-or-user>/nbmf_mm/issues"
+Homepage = "https://github.com/siddC/nbmf_mm"
+Issues   = "https://github.com/siddC/nbmf_mm/issues"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+zip-safe = false
 
 [tool.setuptools.packages.find]
+where = ["src"]
 include = ["nbmf_mm*"]
 
-[tool.setuptools.package-data]
-nbmf_mm = ["py.typed"]
-
+# setuptools_scm configuration: derive version from tags, and write a file
 [tool.setuptools_scm]
-version_scheme = "no-guess-dev"
+version_scheme = "guess-next-dev"
 local_scheme = "node-and-date"
-fallback_version = "0.0.0"
+write_to = "src/nbmf_mm/_version.py"

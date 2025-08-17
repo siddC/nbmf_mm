@@ -1,64 +1,22 @@
-# pixi.toml — dev environment & tasks for NBMF-MM
-# Usage:
-#   pixi install
-#   pixi run install   # installs your package (editable) inside the pixi env
-#   pixi run test
-#   pixi run build
-
+# pixi.toml
 [project]
-name = "nbmf-mm-dev"
-version = "0.0.0"
-description = "Dev environment for NBMF-MM"
 channels = ["conda-forge"]
-# Keep CI simple (you can add more platforms later):
-platforms = ["linux-64"]
+platforms = ["linux-64","osx-64","osx-arm64","win-64"]
 
 [dependencies]
-# Let Pixi pick the current default (will be Python 3.12 on CI images).
-# That's fine now that we aren't pulling numba from PyPI here.
 python = ">=3.9,<3.13"
+numpy = ">=1.22"
+scipy = ">=1.9"
+numexpr = ">=2.8"
 pip = "*"
-numpy = "*"
-scipy = "*"
 
 [pypi-dependencies]
-# Core dev/test tools (managed via PyPI by Pixi)
-pytest = "*"
-pytest-cov = "*"
-ruff = "*"
-mypy = "*"
-numexpr = "*"
-scikit-learn = "*"
-uv = "*"
-
-# NOTE:
-# We intentionally do NOT install 'numba' in the Pixi env.
-# The PyPI solver + Python 3.12 + conda numpy>=2 can push uv/pixi to an old numba/llvmlite
-# sdist that hard-fails on Python>=3.10. Your test suite does not require numba
-# (use_numba=False), so we keep Pixi clean. The uv-based job still exercises the dev extra.
+# Pull in our package editable with dev extras so pytest is available
+nbmf-mm = { path = ".", editable = true, extras = ["dev"] }
+pytest = ">=7"
+pytest-cov = ">=4"
+ruff = ">=0.5"
 
 [tasks]
-# Install your package in editable mode inside the Pixi env
-install = "python -m pip install -e ."
-
-# Run test suite
 test = "pytest -q"
-
-# Lint & format
-lint = "ruff check ."
-fmt = "ruff format ."
-
-# Type check
-types = "mypy --ignore-missing-imports src/nbmf_mm"
-
-# Build sdist+wheel using uv inside the Pixi env
-build = "uv build"
-
-# Publish (requires PYPI_TOKEN in env)
-publish = "uv publish"
-
-# Optional: try numba locally only when you really want it.
-# Uncomment to experiment on local machines known to support a compatible stack:
-# install-numba = "python -m pip install numba && python - <<'PY'
-# import numba, numpy; print('Numba', numba.__version__, 'NumPy', numpy.__version__)
-# PY"
+lint = "ruff check src tests"

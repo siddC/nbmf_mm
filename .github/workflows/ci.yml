@@ -3,94 +3,47 @@ name: CI
 on:
   push:
   pull_request:
-  workflow_dispatch:
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   test:
-    name: test (py${{ matrix.python }})
+    name: test (py${{ matrix.py }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.9", "3.10", "3.11", "3.12"]
+        py: ["3.9", "3.10", "3.11", "3.12"]
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      # If you keep pixi in pyproject.toml this just works.
+      - uses: prefix-dev/setup-pixi@v0
         with:
-          python-version: ${{ matrix.python }}
+          log-level: v
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
+      # Build the editable install + dev deps and run tests in the pixi env
+      - run: pixi run python -V
+      - run: pixi run pip list
+      - run: pixi run pytest -q
 
-      - name: Install package + dev deps (fast, into Actions Python)
-        shell: bash
-        run: |
-          set -euxo pipefail
-          # Try dev extra; if it's not defined, fall back to plain + explicit dev deps.
-          if ! uv pip install --system -e ".[dev]"; then
-            uv pip install --system -e .
-            uv pip install --system pytest pytest-cov ruff mypy scikit-learn numexpr numba
-          fi
-
-      - name: Run tests
-        run: pytest -q --disable-warnings --maxfail=1
-
-  pixi:
-    name: pixi env smoke test
+  pixi-env-smoke:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: prefix-dev/setup-pixi@v0
+      - run: pixi run python -V
 
-      # Avoid the action auto-running 'pixi install' so we can see verbose logs
-      - name: Set up pixi (no auto install)
-        uses: prefix-dev/setup-pixi@v0
-        with:
-          run-install: false
-
-      - name: Solve env (verbose)
-        run: pixi -v install
-
-      - name: Install package into pixi env (editable)
-        run: pixi run install
-
-      - name: Run tests (pixi)
-        run: pixi run test
-
-  build:
-    name: build sdist+wheel
-    needs: [test, pixi]
+  build-sdist-wheel:
+    needs: [test]
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
-
-      - name: Build
-        run: uv build
-
-      - name: Check metadata (twine)
-        run: |
-          python -m pip install --upgrade twine
-          twine check dist/*
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+          python-version: "3.11"
+      - run: python -m pip install -U build
+      - run: python -m build
+      - uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/*
