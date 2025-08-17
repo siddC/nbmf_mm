@@ -1,7 +1,7 @@
 import argparse
 import numpy as np
 
-from .estimator import BernoulliNMF_MM
+from .estimator import NBMF
 
 def _load_array(path):
     if path.endswith(".npz"):
@@ -37,7 +37,7 @@ def main():
         X = _load_array(args.input)
         mask = None if args.mask is None else _load_array(args.mask)
 
-        model = BernoulliNMF_MM(
+        model = NBMF(
             n_components=args.rank,
             orientation=args.orientation,
             alpha=args.alpha,
