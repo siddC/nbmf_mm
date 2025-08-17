@@ -270,16 +270,42 @@ def _init_factors(
     rng: np.random.Generator,
     eps: float,
 ) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Orientation-symmetric initialization:
+
+    We build two base tiles with shape (K, max(M, N)):
+      • Beta_tile from two Gamma draws → elementwise Beta(alpha, beta)
+      • Simplex_tile from U(0,1) entries (positive)
+
+    Then slice consistently:
+      dir-beta  : W0 = Beta_tile[:, :M].T,  H0 = col-simplex(Simplex_tile[:, :N])
+      beta-dir  : W0 = row-simplex(Simplex_tile[:, :M].T),  H0 = Beta_tile[:, :N]
+    """
     M, N = X.shape
+    L = max(M, N)
+
+    # Base tiles (same RNG, same shapes) → symmetry across transpose/orientation
+    # Beta-constrained factor via two gamma draws
+    A = rng.gamma(alpha, 1.0, size=(K, L))
+    B = rng.gamma(beta,  1.0, size=(K, L))
+    Beta_tile = A / (A + B + 1e-12)
+    Beta_tile = np.clip(Beta_tile, eps, 1.0 - eps)
+
+    # Simplex-constrained factor: positive entries then L1 renormalize
+    Simplex_tile = rng.random((K, L)) + 1e-12  # strictly positive
+
     if orientation == "dir-beta":
-        H = rng.random((K, N))
-        H = _normalize_cols_simplex(H)  # start on the simplex
-        W = _rand_beta((M, K), alpha, beta, rng, eps)
+        # H: columns on simplex (K x N)
+        H = _normalize_cols_simplex(Simplex_tile[:, :N].copy())
+        # W: Beta in (0,1) (M x K)
+        W = Beta_tile[:, :M].T.copy()
     else:  # "beta-dir"
-        W = rng.random((M, K))
-        W = _normalize_rows_simplex(W)
-        H = _rand_beta((K, N), alpha, beta, rng, eps)
-    return W, H
+        # W: rows on simplex (M x K)
+        W = _normalize_rows_simplex(Simplex_tile[:, :M].T.copy())
+        # H: Beta in (0,1) (K x N)
+        H = Beta_tile[:, :N].copy()
+
+    return W.astype(np.float64, copy=False), H.astype(np.float64, copy=False)
 
 
 # -------- Estimator -----------------------------------------------------------
