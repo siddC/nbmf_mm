@@ -1,6 +1,6 @@
 # tests/test_symmetry.py
 import numpy as np
-from nbmf_mm import BernoulliNMF_MM
+from nbmf_mm import NBMF
 
 def test_orientation_symmetry_dirbeta_vs_betadir_transpose():
     rng = np.random.default_rng(7)
@@ -8,7 +8,7 @@ def test_orientation_symmetry_dirbeta_vs_betadir_transpose():
     K = 5
 
     # Fit Dir‑Beta on X (default orientation)
-    m_db = BernoulliNMF_MM(
+    m_db = NBMF(
         n_components=K, alpha=1.3, beta=1.7,
         orientation="Aspect Bernoulli",
         max_iter=300, tol=1e-6, random_state=7
@@ -16,7 +16,7 @@ def test_orientation_symmetry_dirbeta_vs_betadir_transpose():
     Xhat_db = m_db.inverse_transform(m_db.W_)
 
     # Fit Beta‑Dir on X^T
-    m_bd = BernoulliNMF_MM(
+    m_bd = NBMF(
         n_components=K, alpha=1.3, beta=1.7,
         orientation="binary ICA",
         max_iter=300, tol=1e-6, random_state=7

@@ -199,8 +199,8 @@ def test_orientation_aliases_roundtrip():
         ("Binary ICA", "beta-dir"),
         ("bICA", "beta-dir"),
     ]:
-        m = BernoulliNMF_MM(n_components=3, orientation=alias, max_iter=5, random_state=0)
+        m = NBMF(n_components=3, orientation=alias, max_iter=5, random_state=0)
         m.fit(X)
         assert m.orientation == canon
     with pytest.raises(ValueError):
-        BernoulliNMF_MM(n_components=3, orientation="Dir-Dir").fit(X)
+        NBMF(n_components=3, orientation="Dir-Dir").fit(X)

@@ -38,7 +38,7 @@ import numpy as np
 
 # Your estimator (scikit-learn style)
 try:
-    from nbmf_mm import NBMF  # alias for BernoulliNMF_MM
+    from nbmf_mm import NBMF
 except Exception as e:
     raise RuntimeError(
         "Could not import 'NBMF' from nbmf_mm. "

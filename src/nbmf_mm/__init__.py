@@ -8,6 +8,6 @@ Non-negative Binary Matrix Factorization using Majorization–Minimization.
 """
 
 from ._version import __version__
-from .estimator import BernoulliNMF_MM, BernoulliNMF_MM as NBMF
+from .estimator import NBMF
 
-__all__ = ["NBMF", "BernoulliNMF_MM", "__version__"]
+__all__ = ["NBMF", "__version__"]
