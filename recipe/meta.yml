@@ -1,0 +1,36 @@
+{% set name = "nbmf-mm" %}
+{% set version = "0.0.1" %}  # update on release
+
+package:
+  name: {{ name|lower }}
+  version: {{ version }}
+
+source:
+  url: https://pypi.io/packages/source/n/nbmf-mm/nbmf-mm-{{ version }}.tar.gz
+  # sha256: <fill after first PyPI release>
+
+build:
+  noarch: python
+  script: "{{ PYTHON }} -m pip install . -vv"
+
+requirements:
+  host:
+    - python >=3.9
+    - pip
+    - setuptools
+  run:
+    - python >=3.9
+    - numpy
+    - scipy
+    - scikit-learn
+
+test:
+  imports:
+    - nbmf_mm
+  commands:
+    - python -c "import nbmf_mm as m; print(m.__version__)"
+
+about:
+  home: https://github.com/siddC/nbmf_mm
+  license: MIT
+  summary: Mean-parameterized Bernoulli (Binary) Matrix Factorization via Majorization–Minimization (NBMF–MM), scikit-learn style.
