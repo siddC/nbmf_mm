@@ -76,3 +76,12 @@ nbmf-mm fit \
 ```
 Outputs W, H, Xhat, objective_history, and summary metrics.
 
+## References
+
+- J. Duchi, S. Shalev‑Shwartz, Y. Singer, T. Chandra (2008).
+  **Efficient Projections onto the ℓ₁‑Ball for Learning in High Dimensions.**
+  *ICML 2008*. (Used here for fast Euclidean projection onto the probability simplex.)
+
+- W. Wang, M. Á. Carreira‑Perpiñán (2013).
+  **Projection onto the probability simplex: An efficient algorithm with a simple proof, and an application.**
+  arXiv:1309.1541. (Another standard simplex projection reference.)
