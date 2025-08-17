@@ -23,7 +23,7 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Information Analysis",
   "Topic :: Scientific/Engineering :: Bio-Informatics",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
-  "Topic :: Scientific/Engineering :: Machine Learning",
+  "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
 # Keep base deps minimal; acceleration is in extras.
