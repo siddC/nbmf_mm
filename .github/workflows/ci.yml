@@ -30,15 +30,15 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v3
 
-      - name: Install package + dev deps (fast)
+      - name: Install package + dev deps (fast, into Actions Python)
         shell: bash
         run: |
           set -euxo pipefail
-          # Prefer extras if present, otherwise fall back to explicit deps.
-          uv pip install -e ".[dev]" || {
-            uv pip install -e .
-            uv pip install pytest pytest-cov ruff mypy scikit-learn numexpr numba
-          }
+          # Try dev extra; if it's not defined, fall back to plain + explicit dev deps.
+          if ! uv pip install --system -e ".[dev]"; then
+            uv pip install --system -e .
+            uv pip install --system pytest pytest-cov ruff mypy scikit-learn numexpr numba
+          fi
 
       - name: Run tests
         run: pytest -q --disable-warnings --maxfail=1
