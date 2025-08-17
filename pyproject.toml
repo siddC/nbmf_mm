@@ -1,68 +1,50 @@
 [build-system]
-requires = ["setuptools>=68", "setuptools_scm[toml]>=8", "wheel"]
+requires = ["setuptools>=75", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "nbmf-mm"
-# Version is derived from your git tags by setuptools_scm:
-dynamic = ["version"]
-description = "Mean-parameterized Bernoulli (binary) matrix factorization via MM (NBMF‑MM), scikit‑learn‑style estimator."
-readme = "README.md"
-license = { text = "MIT" }
+dynamic = ["version"]                           # from setuptools_scm
+description = "Bernoulli mean-parameterized NMF (NBMF) with Majorization–Minimization (NBMF‑MM)"
+readme = {file = "README.md", content-type = "text/markdown"}
 requires-python = ">=3.9"
-dependencies = [
-  "numpy>=1.20",
-]
-
-keywords = ["NMF", "binary", "Bernoulli", "matrix factorization", "MM", "probabilistic", "unsupervised", "scikit-learn"]
-
+license = {text = "MIT"}
+authors = [{ name = "Siddharth M. Chauhan", email = "github.chauhan.siddharth@gmail.com" }]
 classifiers = [
-  "Development Status :: 4 - Beta",
-  "Intended Audience :: Science/Research",
   "License :: OSI Approved :: MIT License",
-  "Programming Language :: Python",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Intended Audience :: Science/Research",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
   "Topic :: Scientific/Engineering :: Information Analysis",
-  "Typing :: Typed",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+  "numpy>=1.22",
+  "scipy>=1.8",
+  "scikit-learn>=1.3",
+]
+
+[project.optional-dependencies]
+accel = [
+  "numexpr>=2.8",
+  "numba>=0.57; python_version < '3.12'",  # don’t block Py3.12
 ]
 
 [project.urls]
-Homepage = "https://github.com/siddC/nbmf_mm"
-Issues   = "https://github.com/siddC/nbmf_mm/issues"
-
-[project.optional-dependencies]
-dev = [
-  "pytest",
-  "pytest-cov",
-  "ruff",
-  "mypy",
-  "numexpr",
-  "numba",
-  "scikit-learn",
-]
-docs = [
-  "sphinx",
-  "furo",
-  "myst-parser",
-]
-
-[tool.setuptools]
-package-dir = {"" = "src"}
+Homepage = "https://github.com/<org-or-user>/nbmf_mm"
+Issues   = "https://github.com/<org-or-user>/nbmf_mm/issues"
 
 [tool.setuptools.packages.find]
-where = ["src"]
 include = ["nbmf_mm*"]
 
 [tool.setuptools.package-data]
-"nbmf_mm" = ["py.typed"]
+nbmf_mm = ["py.typed"]
 
 [tool.setuptools_scm]
-# Write the resolved version for fast runtime `__version__`
-write_to = "src/nbmf_mm/_version.py"
-# Optional safety if git metadata isn't present (e.g., shallow tarball)
+version_scheme = "no-guess-dev"
+local_scheme = "node-and-date"
 fallback_version = "0.0.0"
