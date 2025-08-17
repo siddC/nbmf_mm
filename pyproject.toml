@@ -36,18 +36,21 @@ Issues = "https://github.com/siddC/nbmf_mm/issues"
 Documentation = "https://nbmf-mm.readthedocs.io"
 Changelog = "https://github.com/siddC/nbmf_mm/releases"
 
-[tool.setuptools.packages.find]
-where = ["src"]
-include = ["nbmf_mm*"]
-
-[tool.setuptools.dynamic]
-version = {attr = "nbmf_mm._version.__version__"}
-
 [project.optional-dependencies]
 sklearn = ["scikit-learn>=1.2"]
 dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.4", "mypy>=1.7"]
 docs = ["mkdocs>=1.5", "mkdocstrings[python]>=0.24", "mkdocs-material>=9.5"]
 
+[project.scripts]
+nbmf-mm = "nbmf_mm.cli:main"
+
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
+
+[tool.setuptools.dynamic]
+version = {attr = "nbmf_mm._version.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["nbmf_mm*"]
