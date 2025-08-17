@@ -479,7 +479,19 @@ class BernoulliNMF_MM(BaseEstimator, TransformerMixin):
                 best_obj = obj
                 best = (W.astype(self.dtype, copy=False), H.astype(self.dtype, copy=False), it + 1, obj_hist)
 
+        # Keep the best run
         self.W_, self.components_, self.n_iter_, self.objective_history_ = best
+
+        # --- sklearn-style book-keeping & error metric ---
+        # Shapes
+        self.n_components_ = K
+        self.n_samples_, self.n_features_in_ = M, N
+
+        # Final reconstruction (probabilities) and NLL (data term only)
+        Vbest = _clip01(self.W_ @ self.components_, eps)
+        self.reconstruction_err_ = float(_bern_nll_masked(X, Vbest, mask=mask, eps=eps))
+        # Note: objective_history_ tracks MAP = NLL + negative Beta log-prior
+
         return self
 
     def fit_transform(self, X, y=None, *, mask=None):
