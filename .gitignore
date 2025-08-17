@@ -58,3 +58,6 @@ Thumbs.db
 .tox/
 .mypy_cache/
 .pypirc
+
+# Generated files
+src/nbmf_mm/_version.py
