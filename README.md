@@ -23,3 +23,32 @@ pip install nbmf-mm
 # optional extras
 pip install "nbmf-mm[sklearn]"   # scikit-learn integration (BaseEstimator/TransformerMixin, NNDSVD init)
 pip install "nbmf-mm[docs]"      # docs build
+```
+---
+
+## Quick Start
+
+```python
+import numpy as np
+from nbmf_mm import NBMF  # alias of BernoulliNMF_MM
+
+rng = np.random.default_rng(0)
+X = (rng.random((100, 500)) < 0.25).astype(float)   # binary data in {0,1}
+
+# Aspect Bernoulli: columns of H are on the simplex; W has a Beta prior
+model = NBMF(
+    n_components=20,
+    orientation="dir-beta",
+    alpha=1.2, beta=1.2,
+    random_state=0, max_iter=2000, tol=1e-6,
+    use_numexpr=True, use_numba=True
+).fit(X)
+
+W = model.W_                 # shape (n_samples, n_components)
+H = model.components_        # shape (n_components, n_features)
+Xhat = model.inverse_transform(W)  # probabilities in (0,1)
+
+# Transform new data using fixed components H
+X_new = (rng.random((10, 500)) < 0.25).astype(float)
+W_new = model.transform(X_new)     # shape (10, n_components)
+```
