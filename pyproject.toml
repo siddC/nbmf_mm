@@ -4,24 +4,25 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nbmf-mm"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Mean-parameterized Bernoulli (Binary) Matrix Factorization via Majorization–Minimization (NBMF–MM), scikit-learn-style."
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT" }
+license = { file = "LICENSE.md" }
 authors = [{ name = "Siddharth M. Chauhan", email = "github.chauhan.siddharth@gmail.com" }]
-keywords = ["nmf", "nbmf", "matrix factorization", "bernoulli", "binary", "mm", "Majorization-Minimization", "probabilistic", "dimensionality reduction"]
+keywords = ["nmf", "nbmf", "binary matrix factorization", "bernoulli", "majorization-minimization", "dimensionality reduction"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
   "License :: OSI Approved :: MIT License",
-  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
   "Topic :: Scientific/Engineering :: Information Analysis",
-  "Topic :: Scientific/Engineering :: Bio-Informatics"
 ]
 
 dependencies = [
@@ -33,15 +34,19 @@ dependencies = [
 Homepage = "https://github.com/siddC/nbmf_mm"
 Issues = "https://github.com/siddC/nbmf_mm/issues"
 Documentation = "https://nbmf-mm.readthedocs.io"
+Changelog = "https://github.com/siddC/nbmf_mm/releases"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["nbmf_mm*"]
 
+[tool.setuptools.dynamic]
+version = {attr = "nbmf_mm._version.__version__"}
+
 [project.optional-dependencies]
 sklearn = ["scikit-learn>=1.2"]
 dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.4", "mypy>=1.7"]
-docs = ["mkdocs>=1.5", "mkdocstrings[python]>=0.24"]
+docs = ["mkdocs>=1.5", "mkdocstrings[python]>=0.24", "mkdocs-material>=9.5"]
 
 [tool.pytest.ini_options]
 addopts = "-q"
