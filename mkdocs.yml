@@ -1,0 +1,15 @@
+site_name: NBMF-MM
+repo_url: https://github.com/your-org/nbmf-mm
+repo_name: your-org/nbmf-mm
+theme:
+  name: material
+nav:
+  - Home: docs/index.md
+  - Usage: docs/usage.md
+  - API: docs/api.md
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+plugins:
+  - search

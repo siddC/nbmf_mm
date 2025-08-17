@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nbmf-mm"
+version = "0.1.0"
+description = "Mean-parameterized Bernoulli (Binary) Matrix Factorization via Majorization–Minimization (NBMF–MM), scikit-learn-style."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Your Name", email = "you@example.com" }]
+keywords = ["nmf", "matrix factorization", "bernoulli", "binary", "mm", "probabilistic", "dimensionality reduction"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Information Analysis",
+  "Topic :: Scientific/Engineering :: Bio-Informatics"
+]
+
+dependencies = [
+  "numpy>=1.20",
+  "scipy>=1.8",
+]
+
+[project.urls]
+Homepage = "https://github.com/your-org/nbmf-mm"
+"Bug Tracker" = "https://github.com/your-org/nbmf-mm/issues"
+
+[project.optional-dependencies]
+sklearn = ["scikit-learn>=1.2"]   # only for optional NNDSVD warm start
+repro   = [
+  "pyreadr>=0.4.4",              # load .rda datasets (Magron & Févotte)
+  "matplotlib>=3.5",
+  "rpy2>=3.5; platform_system!='Windows'"
+]
+dev = [
+  "pytest>=7.0",
+  "pytest-cov>=4.0",
+  "ruff>=0.4.0",
+  "mypy>=1.6.0"
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]                   # <— discover packages from ./src
+namespaces = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-q", "--import-mode=importlib"]  # modern import mode, avoids sys.path hacks
