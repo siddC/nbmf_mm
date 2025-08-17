@@ -76,22 +76,20 @@ except Exception:
 
 import re
 
-def _canonical_orientation(value: str | None) -> str:
+def _canonical_orientation(value: Optional[str]) -> str:
     """
     Map user-friendly, case-insensitive names to canonical {'dir-beta','beta-dir'}.
-    Raise later for 'dir-dir' (unsupported) during input validation.
+    'dir-dir' (aka 'binary LDA'/'bLDA') is recognized but unsupported.
 
-    Accepted aliases:
-      Dir-Beta:   "dir-beta", "dir beta", "aspect bernoulli"
-      Beta-Dir:   "beta-dir", "beta dir", "binary ica", "bica"
-      Dir-Dir:    "dir-dir",  "dir dir",  "binary lda", "blda"  (unsupported)
-
-    Returns the canonical hyphenated label if recognized; otherwise a normalized
-    lowercase token string (so the validator can error with a helpful message).
+    Aliases:
+      dir-beta  ← {"Dir-Beta","Dir Beta","Aspect Bernoulli"}
+      beta-dir  ← {"Beta-Dir","Beta Dir","Binary ICA","bICA"}
+      dir-dir   ← {"Dir-Dir","Dir Dir","Binary LDA","bLDA"}
     """
     if value is None:
         return "dir-beta"
-    s = " ".join(re.sub(r"[^a-zA-Z]+", " ", str(value)).lower().split())  # normalize
+    # normalize: drop punctuation, compress spaces, to lower
+    s = " ".join(re.sub(r"[^a-zA-Z]+", " ", str(value)).lower().split())
     alias = {
         "dir beta": "dir-beta",
         "aspect bernoulli": "dir-beta",
@@ -104,7 +102,7 @@ def _canonical_orientation(value: str | None) -> str:
     }
     if s in alias:
         return alias[s]
-    # Accept canonical hyphenated forms and concatenations
+    # accept canonical hyphenated and concatenated forms
     hy = s.replace(" ", "-")
     if hy in {"dir-beta", "beta-dir", "dir-dir"}:
         return hy
@@ -114,21 +112,7 @@ def _canonical_orientation(value: str | None) -> str:
         return "beta-dir"
     if s in {"dirdir", "binarylda"}:
         return "dir-dir"
-    return s  # unrecognized; validator will raise
-
-
-def _is_sparse(X) -> bool:
-    return _HAS_SPARSE and sp.issparse(X)
-
-
-def _to_dense(X):
-    if _is_sparse(X):
-        return X.toarray()
-    return np.asarray(X)
-
-
-def _clip01(A, eps: float) -> np.ndarray:
-    return np.clip(A, eps, 1.0 - eps, out=A)
+    return s  # unrecognized; validator will error later
 
 
 def _check_inputs(
@@ -144,17 +128,18 @@ def _check_inputs(
             raise ValueError("mask shape must match X.")
         if np.any((mask < -eps) | (mask > 1 + eps)):
             raise ValueError("mask must be binary or in [0,1].")
+
     if n_components < 1:
         raise ValueError("n_components must be >= 1.")
     if np.any(np.asarray(alpha) <= 0) or np.any(np.asarray(beta) <= 0):
         raise ValueError("alpha and beta must be > 0.")
+
     # Canonicalize & validate orientation
     orientation = _canonical_orientation(orientation)
     if orientation == "dir-dir":
         raise ValueError(
-            'orientation "dir-dir" (aka "binary LDA"/"bLDA") is not supported '
-            'by NBMF-MM. Use "dir-beta" (aka "Aspect Bernoulli") or '
-            '"beta-dir" (aka "binary ICA").'
+            'orientation "dir-dir" (aka "binary LDA"/"bLDA") is not supported by NBMF-MM. '
+            'Use "dir-beta" (aka "Aspect Bernoulli") or "beta-dir" (aka "binary ICA").'
         )
     if orientation not in ("dir-beta", "beta-dir"):
         raise ValueError(
@@ -164,6 +149,21 @@ def _check_inputs(
             'beta-dir => {"Beta-Dir","Beta Dir","Binary ICA","bICA"}.'
         )
 
+    return X, mask
+
+
+def _is_sparse(X) -> bool:
+    return _HAS_SPARSE and sp.issparse(X)
+
+
+def _to_dense(X):
+    if _is_sparse(X):
+        return X.toarray()
+    return np.asarray(X)
+
+
+def _clip01(A, eps: float) -> np.ndarray:
+    return np.clip(A, eps, 1.0 - eps, out=A)
 
 
 def _bern_nll_masked(X, P, mask=None, eps=1e-9) -> float:
