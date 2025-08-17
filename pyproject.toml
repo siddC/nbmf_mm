@@ -1,56 +1,40 @@
-[build-system]
-requires = ["setuptools>=69", "wheel"]
-build-backend = "setuptools.build_meta"
+# pixi.toml — dev environment & tasks for NBMF-MM
+# Usage:
+#   pixi install
+#   pixi run test
+#   pixi run lint
+#   pixi run build
+#   pixi run publish   # requires PYPI_TOKEN
 
 [project]
-name = "nbmf-mm"
-dynamic = ["version"]
-description = "Mean-parameterized Bernoulli (Binary) Matrix Factorization via Majorization–Minimization (NBMF–MM), scikit-learn-style."
-readme = "README.md"
-requires-python = ">=3.9"
-license = { file = "LICENSE.md" }
-authors = [{ name = "Siddharth M. Chauhan", email = "github.chauhan.siddharth@gmail.com" }]
-keywords = ["nmf", "nbmf", "binary matrix factorization", "bernoulli", "majorization-minimization", "dimensionality reduction"]
-classifiers = [
-  "Development Status :: 3 - Alpha",
-  "Intended Audience :: Science/Research",
-  "License :: OSI Approved :: MIT License",
-  "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.9",
-  "Programming Language :: Python :: 3.10",
-  "Programming Language :: Python :: 3.11",
-  "Programming Language :: Python :: 3.12",
-  "Topic :: Scientific/Engineering :: Artificial Intelligence",
-  "Topic :: Scientific/Engineering :: Bio-Informatics",
-  "Topic :: Scientific/Engineering :: Information Analysis",
-]
+name = "nbmf-mm-dev"
+version = "0.0.0"
+description = "Dev environment for NBMF-MM"
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-64", "osx-arm64", "win-64"]
 
-dependencies = [
-  "numpy>=1.20",
-  "scipy>=1.8",
-]
+[dependencies]
+python = ">=3.9,<3.13"
+numpy = "*"
+scipy = "*"
 
-[project.urls]
-Homepage = "https://github.com/siddC/nbmf_mm"
-Issues = "https://github.com/siddC/nbmf_mm/issues"
-Documentation = "https://nbmf-mm.readthedocs.io"
-Changelog = "https://github.com/siddC/nbmf_mm/releases"
+[pypi-dependencies]
+# Your package (editable install during development)
+nbmf-mm = { path = ".", editable = true }
+# Optional/runtime + dev tools
+scikit-learn = "*"
+numexpr = "*"
+numba = "*"
+pytest = "*"
+pytest-cov = "*"
+ruff = "*"
+mypy = "*"
+uv = "*"
 
-[project.optional-dependencies]
-sklearn = ["scikit-learn>=1.2"]
-dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.4", "mypy>=1.7"]
-docs = ["mkdocs>=1.5", "mkdocstrings[python]>=0.24", "mkdocs-material>=9.5"]
-
-[project.scripts]
-nbmf-mm = "nbmf_mm.cli:main"
-
-[tool.pytest.ini_options]
-addopts = "-q"
-testpaths = ["tests"]
-
-[tool.setuptools.dynamic]
-version = {attr = "nbmf_mm._version.__version__"}
-
-[tool.setuptools.packages.find]
-where = ["src"]
-include = ["nbmf_mm*"]
+[tasks]
+test = "pytest -q"
+lint = "ruff check ."
+fmt = "ruff format ."
+types = "mypy --ignore-missing-imports src/nbmf_mm"
+build = "uv build"
+publish = "uv publish"
