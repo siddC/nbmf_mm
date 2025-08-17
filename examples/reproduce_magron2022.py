@@ -1,214 +1,540 @@
-# reproduce_magron2022.py
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Reproduce Magron & Févotte (2022) experiments with our NBMF-MM implementation.
+Reproduce the experiments from:
+  Paul Magron & Cédric Févotte (2022), "A majorization-minimization algorithm
+  for nonnegative binary matrix factorization", IEEE Signal Processing Letters.
 
-Outputs (per dataset under outputs/<dataset>/):
-  - NBMF-MM_val.npz         : validation perplexity tensor and hyperparam grids
-  - NBMF-MM_model.npz       : best W, H, Y_hat on val; best (K, alpha, beta)
-  - NBMF-MM_test_init.npz   : test perplexity/time/iters across random initializations
-  - NBMF-EM_* analogous (with alpha=beta=1)
-  - logPCA_* analogous (if logisticPCA via rpy2 is available)
+Protocol (as in §4 of the paper):
+  - Datasets: animals, paleo, lastfm. (Binary matrices.)
+  - Split entries into train/val/test = 70%/15%/15%.
+  - Tune hyperparameters (rank K and Beta prior α, β) using validation perplexity.
+  - Report test perplexity for 10 random initializations.
+  - Stopping: relative objective change < 1e-5 or max_iter = 2000.
+  - Compare NBMF-MM (ours), NBMF-EM proxy (α=β=1), and optional logisticPCA baseline.
 
-Data: expects R .rda dataframes in data/ (same filenames as authors).
+References:
+  - Paper: https://arxiv.org/abs/2204.09741
+  - Code template & datasets: https://github.com/magronp/NMF-binary
+  - logisticPCA (R): https://github.com/andland/logisticPCA
+
+This script targets the scikit-learn-style estimator shipped in this repo:
+    from nbmf_mm import NBMF
+and uses orientation="beta-dir" (Beta prior on H; row-simplex on W) to match the paper.
 """
 
-import os, time
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import time
+from dataclasses import dataclass, asdict
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional, Tuple
+
 import numpy as np
-import pyreadr
 
-from nbmf_mm import BernoulliNMF_MM
+# Your estimator (scikit-learn style)
+try:
+    from nbmf_mm import NBMF  # alias for BernoulliNMF_MM
+except Exception as e:
+    raise RuntimeError(
+        "Could not import 'NBMF' from nbmf_mm. "
+        "Install the package in editable mode first: `pip install -e .`"
+    ) from e
 
-# ---------------- helpers ----------------
 
-def create_folder(path: str):
-    os.makedirs(path, exist_ok=True)
+# ---------------------------- I/O utilities --------------------------------- #
 
-def build_split_masks(shape, prop_train=0.7, prop_val=0.15, seed=12345):
+def _try_import_pyreadr():
+    try:
+        import pyreadr  # type: ignore
+        return pyreadr
+    except Exception:
+        return None
+
+
+def _try_import_rpy2():
+    try:
+        import rpy2.robjects as ro  # type: ignore
+        from rpy2.robjects import numpy2ri  # type: ignore
+        from rpy2.robjects.packages import importr  # type: ignore
+        numpy2ri.activate()
+        return ro, importr
+    except Exception:
+        return None, None
+
+
+def load_binary_matrix(path: Path) -> np.ndarray:
+    """
+    Load a binary matrix from .rda/.RData (prefers pyreadr, falls back to rpy2),
+    or from .npz/.npy (numpy).
+
+    Returns
+    -------
+    X : np.ndarray (float64), values in {0,1} or [0,1]
+    """
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(path)
+
+    ext = path.suffix.lower()
+    if ext in {".npz", ".npy"}:
+        arr = np.load(path, allow_pickle=False)
+        if isinstance(arr, np.lib.npyio.NpzFile):
+            # choose the only array or 'arr_0'
+            keys = list(arr.keys())
+            key = "arr_0" if "arr_0" in arr else keys[0]
+            X = np.asarray(arr[key], dtype=float)
+        else:
+            X = np.asarray(arr, dtype=float)
+        return X
+
+    if ext in {".rda", ".rdata"}:
+        # Try pyreadr first
+        pyreadr = _try_import_pyreadr()
+        if pyreadr is not None:
+            result = pyreadr.read_r(path.as_posix())
+            # Pick the first matrix/data.frame-like object
+            for key, obj in result.items():
+                arr = np.asarray(obj)
+                if arr.ndim == 2:
+                    X = arr.astype(float)
+                    return X
+            raise ValueError(f"No 2D arrays found in {path}")
+        # Fall back to rpy2
+        ro, importr = _try_import_rpy2()
+        if ro is not None:
+            base = importr("base")
+            env = ro.Environment()
+            base.load(path.as_posix(), env)
+            for key in env.keys():
+                arr = np.array(env.find(key))
+                if arr.ndim == 2:
+                    return arr.astype(float)
+            raise ValueError(f"No 2D arrays found in {path}")
+        raise RuntimeError(
+            f"Install either 'pyreadr' or 'rpy2' to read RData: {path}"
+        )
+
+    raise ValueError(f"Unsupported file type: {path.suffix}")
+
+
+# ------------------------- metrics / splitting ------------------------------- #
+
+def make_random_masks(shape: Tuple[int, int], seed: int,
+                      train_frac: float = 0.70,
+                      val_frac: float = 0.15) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Random entry-wise split into train/val/test masks.
+    """
     M, N = shape
     rng = np.random.default_rng(seed)
-    # sample entries uniformly at random
-    idx = np.arange(M * N)
-    rng.shuffle(idx)
-    n_train = int(round(prop_train * idx.size))
-    n_val   = int(round(prop_val   * idx.size))
-    train_idx = idx[:n_train]
-    val_idx   = idx[n_train:n_train + n_val]
-    test_idx  = idx[n_train + n_val:]
+    r = rng.random((M, N))
+    train_thr = train_frac
+    val_thr = train_frac + val_frac
+    train = (r < train_thr).astype(float)
+    val = ((r >= train_thr) & (r < val_thr)).astype(float)
+    test = (r >= val_thr).astype(float)
+    return train, val, test
 
-    train_mask = np.zeros(M * N, dtype=np.uint8); train_mask[train_idx] = 1
-    val_mask   = np.zeros(M * N, dtype=np.uint8); val_mask[val_idx]     = 1
-    test_mask  = np.zeros(M * N, dtype=np.uint8); test_mask[test_idx]   = 1
 
-    return train_mask.reshape(M, N), val_mask.reshape(M, N), test_mask.reshape(M, N)
+def bernoulli_mean_nll(y: np.ndarray, p: np.ndarray, mask: Optional[np.ndarray] = None) -> float:
+    """
+    Average negative log-likelihood for Bernoulli(y | p) over masked entries.
+    """
+    eps = 1e-12
+    p = np.clip(p, eps, 1.0 - eps)
+    if mask is None:
+        mask = np.ones_like(y, dtype=float)
+    nobs = float(mask.sum())
+    if nobs == 0.0:
+        return np.nan
+    nll = -(y * np.log(p) + (1.0 - y) * np.log(1.0 - p))
+    return float((nll * mask).sum() / nobs)
 
-def get_perplexity(Y: np.ndarray, Yhat: np.ndarray, mask: np.ndarray, eps=1e-9) -> float:
-    V = np.clip(Yhat, eps, 1.0 - eps)
-    M = mask.astype(Y.dtype)
-    ll = (M * Y) * np.log(V) + (M * (1.0 - Y)) * np.log(1.0 - V)
-    nobs = float(M.sum())
-    return float(-ll.sum() / max(nobs, 1.0))
 
-def model_fit_nbmf(X_df, train_mask, K, alpha, beta, *, init='random',
-                   orientation='beta-dir', max_iter=2000, tol=1e-5, seed=12345):
-    Y = X_df.to_numpy().astype(np.float64, copy=False)
-    model = BernoulliNMF_MM(
-        n_components=int(K),
-        alpha=alpha, beta=beta,
-        orientation=orientation,
-        init=init,
-        max_iter=max_iter, tol=tol,
-        random_state=seed, verbose=0
-    )
-    t0 = time.perf_counter()
-    W = model.fit_transform(Y, mask=train_mask)
-    H = model.components_
-    dur = time.perf_counter() - t0
-    Yhat = model.inverse_transform(W)
-    return W, H, Yhat, dur, np.array(model.objective_history_, dtype=float), model.n_iter_
+def perplexity(y: np.ndarray, p: np.ndarray, mask: Optional[np.ndarray] = None) -> float:
+    """
+    Perplexity as used in the paper: exp(mean NLL over the eval set).
+    """
+    return float(np.exp(bernoulli_mean_nll(y, p, mask)))
 
-# (optional) logistic PCA via rpy2
-def model_fit_logpca(X_df, train_mask, K, max_iter=2000, seed=12345):
+
+# -------------------------- models / baselines ------------------------------- #
+
+def fit_nbmf_mm(
+    X: np.ndarray,
+    mask_train: np.ndarray,
+    K: int,
+    alpha: float,
+    beta: float,
+    random_state: int,
+    max_iter: int = 2000,
+    tol: float = 1e-5,
+    projection_method: str = "duchi",
+    projection_backend: str = "auto",
+    use_numexpr: bool = True,
+) -> Tuple[NBMF, np.ndarray]:
+    """
+    Train NBMF-MM (orientation='beta-dir') on the training subset.
+    Returns the fitted model and the full-matrix probabilities Xhat.
+    """
+    model = NBMF(
+        n_components=K,
+        orientation="beta-dir",   # Beta prior on H; W row-simplex, as in the paper
+        alpha=alpha,
+        beta=beta,
+        max_iter=max_iter,
+        tol=tol,
+        random_state=random_state,
+        projection_method=projection_method,
+        projection_backend=projection_backend,
+        use_numexpr=use_numexpr,
+        n_init=1,
+    ).fit(X, mask=mask_train)
+
+    # Full reconstruction (probabilities)
+    Xhat = model.inverse_transform(model.W_)  # shape like X
+    return model, Xhat
+
+
+def fit_logistic_pca_predict(
+    X: np.ndarray,
+    K: int,
+    max_iters: int = 2000,
+    tol: float = 1e-5,
+    m: Optional[int] = 4,
+) -> Optional[np.ndarray]:
+    """
+    Train logistic PCA (R package 'logisticPCA') and return fitted probabilities.
+    If rpy2/logisticPCA are unavailable, returns None.
+    NOTE: logisticPCA does not support masked fitting. For simplicity we fit on
+    the full matrix and *evaluate* on masked entries (as the paper does).
+    """
+    ro, importr = _try_import_rpy2()
+    if ro is None:
+        return None
     try:
-        import rpy2.robjects as ro
-        from rpy2.robjects import numpy2ri, packages
-        numpy2ri.activate()
-        logisticPCA = packages.importr("logisticPCA")
-        base = packages.importr("base")
+        logpca = importr("logisticPCA")
     except Exception:
-        return None  # gracefully skip
+        return None
 
-    Y = X_df.to_numpy().astype(np.float64, copy=False)
-    # use only training entries for logisticPCA by imputing 0.5 elsewhere (neutral)
-    Y_imp = Y.copy()
-    Y_imp[train_mask == 0] = 0.5
-    t0 = time.perf_counter()
-    fit = logisticPCA.logisticPCA(Y_imp, k=int(K), main_effects=False, m=int(max_iter), quiet=True)
-    dur = time.perf_counter() - t0
-    # fitted natural parameter Θ; convert to mean via sigmoid
-    theta = np.array(fit.rx2("Theta"), dtype=float)
-    Yhat = 1.0 / (1.0 + np.exp(-theta))
-    # crude factor proxies for saving viz (not needed for perplexity)
-    W = np.zeros((Y.shape[0], int(K))); H = np.zeros((int(K), Y.shape[1]))
-    return W, H, Yhat, dur, np.array([], dtype=float), int(max_iter)
+    rmat = ro.r.matrix(X, nrow=X.shape[0], ncol=X.shape[1])
+    # Fit LPCA
+    if m is None:
+        # Let the package solve for m using its internal validation trick
+        fit = logpca.logisticPCA(
+            rmat, k=int(K), m=0, quiet=True,
+            max_iters=int(max_iters), conv_criteria=tol, main_effects=True
+        )
+    else:
+        fit = logpca.logisticPCA(
+            rmat, k=int(K), m=int(m), quiet=True,
+            max_iters=int(max_iters), conv_criteria=tol, main_effects=True
+        )
+    # Fitted probabilities on the TRAIN matrix (we evaluate with masks)
+    fitted = logpca.fitted(fit, type="response")
+    return np.array(fitted, dtype=float)
 
-# ---------------- main ----------------
+
+# ------------------------------ experiment ----------------------------------- #
+
+@dataclass
+class GridResult:
+    dataset: str
+    K: int
+    alpha: float
+    beta: float
+    val_perplexity: float
+    seed: int
+    elapsed_s: float
+
+
+@dataclass
+class TestResult:
+    dataset: str
+    method: str
+    K: int
+    alpha: float
+    beta: float
+    seed: int
+    test_perplexity: float
+    elapsed_s: float
+
+
+def run_validation_grid(
+    X: np.ndarray,
+    masks: Tuple[np.ndarray, np.ndarray, np.ndarray],
+    dataset: str,
+    K_grid: Iterable[int],
+    alpha_grid: Iterable[float],
+    beta_grid: Iterable[float],
+    seed: int,
+    max_iter: int,
+    tol: float,
+    **fit_kwargs,
+) -> Tuple[Dict[str, float], Tuple[int, float, float]]:
+    """
+    Run a grid over (K, alpha, beta). Return:
+      – scores: mapping "K|alpha|beta" -> val perplexity
+      – best triple (K*, alpha*, beta*)
+    """
+    mask_train, mask_val, _ = masks
+    scores: Dict[str, float] = {}
+    best = (None, None, None)
+    best_val = np.inf
+
+    for K in K_grid:
+        for alpha in alpha_grid:
+            for beta in beta_grid:
+                t0 = time.time()
+                _, Xhat = fit_nbmf_mm(
+                    X, mask_train, K, alpha, beta,
+                    random_state=seed, max_iter=max_iter, tol=tol, **fit_kwargs
+                )
+                elapsed = time.time() - t0
+                vpx = perplexity(X, Xhat, mask_val)
+                key = f"{K}|{alpha}|{beta}"
+                scores[key] = float(vpx)
+                print(f"[val] {dataset}: K={K:>3d} α={alpha:.2f} β={beta:.2f} "
+                      f"→ perplexity={vpx:.6f} ({elapsed:.1f}s)")
+                if vpx < best_val:
+                    best_val = vpx
+                    best = (K, alpha, beta)
+
+    assert all(x is not None for x in best)
+    return scores, (int(best[0]), float(best[1]), float(best[2]))
+
+
+def evaluate_test_runs(
+    X: np.ndarray,
+    masks: Tuple[np.ndarray, np.ndarray, np.ndarray],
+    dataset: str,
+    method: str,
+    K: int,
+    alpha: float,
+    beta: float,
+    seeds: Iterable[int],
+    max_iter: int,
+    tol: float,
+    **fit_kwargs,
+) -> List[TestResult]:
+    """
+    Train (on train mask) and evaluate test perplexity over multiple seeds.
+    """
+    mask_train, _, mask_test = masks
+    results: List[TestResult] = []
+    for s in seeds:
+        t0 = time.time()
+        if method == "NBMF-EM":
+            # EM proxy: α=β=1 (as noted in the paper)
+            _, Xhat = fit_nbmf_mm(
+                X, mask_train, K, 1.0, 1.0,
+                random_state=s, max_iter=max_iter, tol=tol, **fit_kwargs
+            )
+            a, b = 1.0, 1.0
+        elif method == "NBMF-MM":
+            _, Xhat = fit_nbmf_mm(
+                X, mask_train, K, alpha, beta,
+                random_state=s, max_iter=max_iter, tol=tol, **fit_kwargs
+            )
+            a, b = alpha, beta
+        elif method == "logPCA":
+            Xhat = fit_logistic_pca_predict(
+                X, K=K, max_iters=max_iter, tol=tol, m=4
+            )
+            if Xhat is None:
+                print("[warn] rpy2/logisticPCA not available — skipping logPCA.")
+                continue
+            a, b = np.nan, np.nan
+        else:
+            raise ValueError(method)
+
+        t = time.time() - t0
+        tpx = perplexity(X, Xhat, mask_test)
+        results.append(TestResult(dataset, method, K, float(a), float(b), int(s), float(tpx), float(t)))
+        print(f"[test] {dataset}: {method:8s} K={K:>3d} "
+              f"α={a if not np.isnan(a) else '—'} β={b if not np.isnan(b) else '—'} "
+              f"→ perplexity={tpx:.6f} ({t:.1f}s)")
+    return results
+
+
+def dataset_default_grids(name: str) -> Tuple[List[int], List[float], List[float]]:
+    """
+    Heuristic grids aligned with the paper’s figures (α,β ∈ {1.0,1.4,1.8,2.2,2.6,3.0}).
+    K grids are sized to dataset scale and can be overridden from CLI.
+    """
+    ab = [1.0, 1.4, 1.8, 2.2, 2.6, 3.0]
+    if name == "animals":
+        K = [3, 4, 5, 6, 8]
+    elif name == "paleo":
+        K = [5, 10, 15, 20, 25]
+    elif name == "lastfm":
+        K = [10, 15, 20, 25, 30]
+    else:
+        K = [5, 10, 15, 20]
+    return K, ab, ab
+
+
+def locate_dataset_file(data_root: Path, dataset: str) -> Path:
+    """
+    Map dataset name to a file path under data_root.
+    """
+    candidates = [
+        data_root / f"{dataset}.rda",
+        data_root / f"{dataset}.RData",
+        data_root / f"{dataset}.npz",
+        data_root / f"{dataset}.npy",
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    raise FileNotFoundError(f"Dataset '{dataset}' not found under {data_root}")
+
+
+# ---------------------------------- main ------------------------------------- #
+
+def main(argv: Optional[List[str]] = None) -> None:
+    p = argparse.ArgumentParser(
+        description="Reproduce Magron & Févotte (2022) NBMF-MM experiments."
+    )
+    p.add_argument("--data-root", type=Path, required=True,
+                   help="Folder containing animals/paleo/lastfm (.rda/.npz/.npy).")
+    p.add_argument("--datasets", type=str, default="animals,paleo,lastfm",
+                   help="Comma-separated list of datasets to run.")
+    p.add_argument("--outdir", type=Path, default=Path("outputs/magron2022"),
+                   help="Where to save results.")
+    p.add_argument("--seed", type=int, default=0, help="Seed for the CV split & grid.")
+    p.add_argument("--n-test-seeds", type=int, default=10, help="#seeds for test runs.")
+    p.add_argument("--max-iter", type=int, default=2000, help="Max iterations.")
+    p.add_argument("--tol", type=float, default=1e-5, help="Relative tolerance.")
+    p.add_argument("--k-grid", type=str, default="", help="Optional K grid, e.g. '5,10,15'.")
+    p.add_argument("--alpha-grid", type=str, default="", help="Optional alpha grid, e.g. '1,1.4,1.8'.")
+    p.add_argument("--beta-grid", type=str, default="", help="Optional beta grid, e.g. '1,1.4,1.8'.")
+    p.add_argument("--no-logpca", action="store_true", help="Disable logisticPCA baseline.")
+    p.add_argument("--save-lastfm-H", action="store_true",
+                   help="Save H heatmap-friendly array for lastfm with best params.")
+    p.add_argument("--projection-method", type=str, default="duchi",
+                   choices=["duchi", "normalize"])
+    p.add_argument("--projection-backend", type=str, default="auto",
+                   choices=["auto", "numba", "numpy"])
+    p.add_argument("--no-numexpr", action="store_true", help="Disable NumExpr acceleration.")
+
+    args = p.parse_args(argv)
+
+    outdir = Path(args.outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    datasets = [d.strip() for d in args.datasets.split(",") if d.strip()]
+    meta = {
+        "paper": "Magron & Févotte (2022), A majorization–minimization algorithm for nonnegative binary matrix factorization",
+        "split": "entry-wise 70/15/15 train/val/test",
+        "stopping": {"tol": args.tol, "max_iter": args.max_iter},
+        "estimator": "NBMF (orientation='beta-dir')",
+        "logisticPCA": "optional via rpy2",
+    }
+
+    for ds in datasets:
+        ds_dir = outdir / ds
+        ds_dir.mkdir(parents=True, exist_ok=True)
+        data_path = locate_dataset_file(Path(args.data_root), ds)
+        X = load_binary_matrix(data_path)
+        X = X.astype(float)
+        print(f"Loaded {ds} from {data_path} with shape {X.shape}")
+
+        mask_train, mask_val, mask_test = make_random_masks(X.shape, seed=args.seed)
+        masks = (mask_train, mask_val, mask_test)
+
+        # Grids
+        def_gridK, def_gridA, def_gridB = dataset_default_grids(ds)
+        K_grid = (
+            [int(x) for x in args.k_grid.split(",")] if args.k_grid else def_gridK
+        )
+        alpha_grid = (
+            [float(x) for x in args.alpha_grid.split(",")] if args.alpha_grid else def_gridA
+        )
+        beta_grid = (
+            [float(x) for x in args.beta_grid.split(",")] if args.beta_grid else def_gridB
+        )
+
+        # Validation grid (single seed for selection as in paper)
+        grid_scores, (bestK, bestA, bestB) = run_validation_grid(
+            X, masks, ds, K_grid, alpha_grid, beta_grid, seed=args.seed,
+            max_iter=args.max_iter, tol=args.tol,
+            projection_method=args.projection_method,
+            projection_backend=args.projection_backend,
+            use_numexpr=not args.no_numexpr,
+        )
+
+        # Persist α–β heatmap data for the best K (used by display script)
+        # Store all K slices too.
+        np.savez_compressed(
+            ds_dir / "val_grid.npz",
+            scores=np.array(
+                [[(k, a, b, grid_scores[f"{k}|{a}|{b}"])
+                  for a in alpha_grid for b in beta_grid] for k in K_grid],
+                dtype=float,
+            ),
+            K_grid=np.array(K_grid, dtype=int),
+            alpha_grid=np.array(alpha_grid, dtype=float),
+            beta_grid=np.array(beta_grid, dtype=float),
+            bestK=bestK, bestA=bestA, bestB=bestB
+        )
+        with open(ds_dir / "val_best.json", "w") as f:
+            json.dump({"bestK": bestK, "bestA": bestA, "bestB": bestB}, f, indent=2)
+
+        # Test evaluation across seeds
+        seeds = [int(s) for s in range(args.seed, args.seed + args.n_test_seeds)]
+        rows: List[TestResult] = []
+        rows += evaluate_test_runs(
+            X, masks, ds, "NBMF-EM", bestK, bestA, bestB, seeds,
+            max_iter=args.max_iter, tol=args.tol,
+            projection_method=args.projection_method,
+            projection_backend=args.projection_backend,
+            use_numexpr=not args.no_numexpr,
+        )
+        rows += evaluate_test_runs(
+            X, masks, ds, "NBMF-MM", bestK, bestA, bestB, seeds,
+            max_iter=args.max_iter, tol=args.tol,
+            projection_method=args.projection_method,
+            projection_backend=args.projection_backend,
+            use_numexpr=not args.no_numexpr,
+        )
+        if not args.no_logpca:
+            rows += evaluate_test_runs(
+                X, masks, ds, "logPCA", bestK, bestA, bestB, seeds,
+                max_iter=args.max_iter, tol=args.tol,
+            )
+
+        # Save CSV
+        hdr = "dataset,method,K,alpha,beta,seed,test_perplexity,elapsed_s\n"
+        with open(ds_dir / "test_results.csv", "w") as f:
+            f.write(hdr)
+            for r in rows:
+                f.write(
+                    f"{r.dataset},{r.method},{r.K},{r.alpha},{r.beta},"
+                    f"{r.seed},{r.test_perplexity:.12g},{r.elapsed_s:.6g}\n"
+                )
+
+        # Save H for lastfm visualization (paper's Fig. 3)
+        if args.save_lastfm_H and ds.lower() == "lastfm":
+            m, Xhat = fit_nbmf_mm(
+                X, mask_train, bestK, bestA, bestB,
+                random_state=args.seed, max_iter=args.max_iter, tol=args.tol,
+                projection_method=args.projection_method,
+                projection_backend=args.projection_backend,
+                use_numexpr=not args.no_numexpr,
+            )
+            np.save(ds_dir / "H_lastfm_best.npy", m.components_)
+
+    with open(outdir / "meta.json", "w") as f:
+        json.dump(meta, f, indent=2)
+
+    print("\nDone. Use display_reproduced_results.py to render figures.")
+
 
 if __name__ == "__main__":
-    np.random.seed(12345)
-
-    data_dir = "data/"
-    out_dir  = "outputs/"
-    datasets = ["animals", "paleo", "lastfm"]
-    prop_train, prop_val = 0.70, 0.15
-
-    max_iter = 2000
-    tol = 1e-5
-    n_init = 10
-
-    # EXACT grids from authors:
-    list_nfactors = [2, 4, 8, 16]                # K grid (paper code)  ← verified in main_script.py
-    list_alpha = np.linspace(1, 3, 11)           # prior grid            ← verified in main_script.py
-    list_beta  = list_alpha
-
-    # NBMF‑EM (α=β=1) and NBMF‑MM (grid), plus logPCA
-    models = ["NBMF-EM", "NBMF-MM", "logPCA"]
-
-    for dataset in datasets:
-        X_df = pyreadr.read_r(os.path.join(data_dir, f"{dataset}.rda"))[dataset]
-        M, N = X_df.shape
-        train_mask, val_mask, test_mask = build_split_masks(X_df.shape, prop_train=prop_train, prop_val=prop_val, seed=12345)
-        np.savez(os.path.join(data_dir, f"{dataset}_split.npz"), train_mask=train_mask, val_mask=val_mask, test_mask=test_mask)
-
-        ds_out = os.path.join(out_dir, dataset) + "/"
-        create_folder(ds_out)
-
-        # ---------- NBMF‑EM (α=β=1) ----------
-        best_val = np.inf; best_tuple = None
-        val_pplx_em = np.zeros((len(list_nfactors), 1, 1))
-        for ik, K in enumerate(list_nfactors):
-            W, H, Yhat, dur, hist, iters = model_fit_nbmf(
-                X_df, train_mask, K, alpha=1.0, beta=1.0,
-                init="random", orientation="beta-dir",  # authors’ orientation
-                max_iter=max_iter, tol=tol, seed=12345
-            )
-            pplx = get_perplexity(X_df.to_numpy(), Yhat, mask=val_mask)
-            val_pplx_em[ik, 0, 0] = pplx
-            if pplx < best_val:
-                np.savez(os.path.join(ds_out, "NBMF-EM_model.npz"),
-                         W=W, H=H, Y_hat=Yhat,
-                         hyper_params=(int(K), 1.0, 1.0), time=dur, loss=hist, iters=iters)
-                best_val = pplx; best_tuple = (int(K), 1.0, 1.0)
-        np.savez(os.path.join(ds_out, "NBMF-EM_val.npz"),
-                 val_pplx=val_pplx_em, list_hyper=(list_nfactors, [1.0], [1.0]))
-
-        # ---------- NBMF‑MM (grid over α,β) ----------
-        nk, na, nb = len(list_nfactors), len(list_alpha), len(list_beta)
-        val_pplx = np.zeros((nk, na, nb))
-        best_val = np.inf; best_tuple = None
-        for ik, K in enumerate(list_nfactors):
-            for ia, a in enumerate(list_alpha):
-                for ib, b in enumerate(list_beta):
-                    W, H, Yhat, dur, hist, iters = model_fit_nbmf(
-                        X_df, train_mask, K, alpha=float(a), beta=float(b),
-                        init="random", orientation="beta-dir",
-                        max_iter=max_iter, tol=tol, seed=12345
-                    )
-                    pplx = get_perplexity(X_df.to_numpy(), Yhat, mask=val_mask)
-                    val_pplx[ik, ia, ib] = pplx
-                    if pplx < best_val:
-                        np.savez(os.path.join(ds_out, "NBMF-MM_model.npz"),
-                                 W=W, H=H, Y_hat=Yhat,
-                                 hyper_params=(int(K), float(a), float(b)), time=dur, loss=hist, iters=iters)
-                        best_val = pplx; best_tuple = (int(K), float(a), float(b))
-        np.savez(os.path.join(ds_out, "NBMF-MM_val.npz"),
-                 val_pplx=val_pplx, list_hyper=(list_nfactors, list_alpha, list_beta))
-
-        # ---------- logPCA ----------
-        # Validation: choose best K only (no hyperparameters)
-        lpca_best = None
-        try_lpca = True
-        val_pplx_lpca = np.zeros((len(list_nfactors), 1, 1))
-        for ik, K in enumerate(list_nfactors):
-            out = model_fit_logpca(X_df, train_mask, K, max_iter=max_iter, seed=12345)
-            if out is None:
-                try_lpca = False
-                break
-            W, H, Yhat, dur, hist, iters = out
-            pplx = get_perplexity(X_df.to_numpy(), Yhat, mask=val_mask)
-            val_pplx_lpca[ik, 0, 0] = pplx
-            if (lpca_best is None) or (pplx < lpca_best[0]):
-                np.savez(os.path.join(ds_out, "logPCA_model.npz"),
-                         W=W, H=H, Y_hat=Yhat,
-                         hyper_params=(int(K), None, None), time=dur, loss=hist, iters=iters)
-                lpca_best = (pplx, int(K))
-        if try_lpca:
-            np.savez(os.path.join(ds_out, "logPCA_val.npz"),
-                     val_pplx=val_pplx_lpca, list_hyper=(list_nfactors, [None], [None]))
-
-        # ---------- Test with n_init random initializations ----------
-        for model_name in ["NBMF-EM", "NBMF-MM"] + (["logPCA"] if try_lpca else []):
-            hp = np.load(os.path.join(ds_out, f"{model_name}_model.npz"), allow_pickle=True)["hyper_params"]
-            K = int(hp[0]); a = float(hp[1]) if hp[1] is not None else None; b = float(hp[2]) if hp[2] is not None else None
-
-            test_pplx = np.zeros(n_init)
-            test_time = np.zeros(n_init)
-            test_iter = np.zeros(n_init)
-
-            for i in range(n_init):
-                if model_name == "logPCA":
-                    out = model_fit_logpca(X_df, train_mask, K, max_iter=max_iter, seed=12345 + i)
-                    if out is None:
-                        break
-                    W, H, Yhat, dur, hist, iters = out
-                else:
-                    W, H, Yhat, dur, hist, iters = model_fit_nbmf(
-                        X_df, train_mask, K, alpha=(a if a is not None else 1.0), beta=(b if b is not None else 1.0),
-                        init="random", orientation="beta-dir",
-                        max_iter=max_iter, tol=tol, seed=12345 + i
-                    )
-                pplx = get_perplexity(X_df.to_numpy(), Yhat, mask=test_mask)
-                test_pplx[i] = pplx; test_time[i] = dur; test_iter[i] = iters
-
-            np.savez(os.path.join(ds_out, f"{model_name}_test_init.npz"),
-                     test_pplx=test_pplx, test_time=test_time, test_iter=test_iter)
+    main()
