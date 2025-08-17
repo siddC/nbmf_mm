@@ -20,10 +20,23 @@ left-out entries in the likelihood and updates.
 
 Scikit-learn-style estimator: BernoulliNMF_MM(BaseEstimator, TransformerMixin)
 
-References
-----------
-- P. Magron & C. Févotte (2022), "A majorization-minimization algorithm for
-  nonnegative binary matrix factorization" (Algorithm 1; Eqs. 14-20).  # arXiv:2204.09741
+Notes on the objective:
+  The MM monotonicity guarantee in Magron & Févotte (2022) is for the MAP
+  objective (negative log-likelihood + negative log-prior on the Beta-
+  constrained factor), not the likelihood alone. We therefore track and use
+  the full MAP objective in `objective_history_` and for convergence.
+
+Simplex projection:
+  Default uses the Duchi et al. (ICML 2008) Euclidean projection ("duchi").
+  Users may select the legacy "normalize" method (threshold + L1 renorm),
+  which follows the original MM derivation for simplex steps and ensures
+  monotone decrease of the MAP objective.
+
+References:
+  - P. Magron & C. Févotte (2022), A majorization-minimization algorithm for
+    nonnegative binary matrix factorization. IEEE SPL. arXiv:2204.09741.
+  - J. Duchi, S. Shalev-Shwartz, Y. Singer, T. Chandra (2008),
+    Efficient Projections onto the ℓ₁-Ball for Learning in High Dimensions.
 """
 
 from __future__ import annotations
@@ -113,6 +126,15 @@ def _bern_nll_masked(X, P, mask=None, eps=1e-9) -> float:
     return float(-((M * X) * np.log(P) + (M * (1.0 - X)) * np.log(1.0 - P)).sum())
 
 
+def _beta_neglogprior(Z, alpha: float, beta: float, eps: float = 1e-9) -> float:
+    """Negative log-prior for independent Beta(alpha, beta) entries of Z."""
+    Z = np.clip(Z, eps, 1.0 - eps)
+    a = float(alpha)
+    b = float(beta)
+    # Drop constants: we only need a monotone proxy for convergence & history.
+    return float(-((a - 1.0) * np.log(Z) + (b - 1.0) * np.log(1.0 - Z)).sum())
+
+
 def _safe_div(num, den, eps=1e-12):
     return num / (den + eps)
 
@@ -139,6 +161,7 @@ def _project_cols_simplex_numpy_impl(H: np.ndarray) -> np.ndarray:
     return _project_rows_simplex_numpy_impl(H.T).T
 
 if _HAS_NUMBA:
+    from numba import njit
 
     @njit(cache=True, fastmath=True)
     def _project_simplex_row_numba(v):
@@ -164,9 +187,7 @@ if _HAS_NUMBA:
 
     def _project_cols_simplex_numba_impl(H):
         return _project_rows_simplex_numba_impl(H.T).T
-
 else:
-    # fallbacks alias the NumPy implementation
     _project_rows_simplex_numba_impl = _project_rows_simplex_numpy_impl
     _project_cols_simplex_numba_impl = _project_cols_simplex_numpy_impl
 
@@ -206,7 +227,7 @@ def _init_factors(
     M, N = X.shape
     if orientation == "dir-beta":
         H = rng.random((K, N))
-        H = _project_cols_simplex_numpy_impl(H)  # initial simplex, NumPy is fine
+        H = _project_cols_simplex_numpy_impl(H)
         W = _rand_beta((M, K), alpha, beta, rng, eps)
     else:  # "beta-dir"
         W = rng.random((M, K))
@@ -231,11 +252,10 @@ class BernoulliNMF_MM(BaseEstimator, TransformerMixin):
     n_init : int, default=1
     random_state : int|None, default=None
     use_numexpr : bool, default=True
-    use_numba : bool, default=True
-        (kept for backward compatibility; see projection_backend)
+    use_numba : bool, default=True  # kept for backward compat
     projection_method : {"duchi","normalize"}, default="duchi"
         "duchi": Euclidean projection to simplex (Duchi et al., 2008).
-        "normalize": legacy behavior (threshold at 0 and renormalize).
+        "normalize": legacy behavior (threshold + L1 renorm, MM-faithful).
     projection_backend : {"auto","numba","numpy"}, default="auto"
         Backend for the "duchi" method. "auto": prefer numba if available.
     dtype : {np.float64, np.float32}, default=np.float64
@@ -247,6 +267,7 @@ class BernoulliNMF_MM(BaseEstimator, TransformerMixin):
     W_ : (M, K) ndarray
     n_iter_ : int
     objective_history_ : list[float]
+        Full MAP objective values (NLL + negative Beta log-prior) per outer iter.
     """
 
     def __init__(
@@ -349,9 +370,16 @@ class BernoulliNMF_MM(BaseEstimator, TransformerMixin):
 
     # ---- public API ----------------------------------------------------------
 
+    def _prior_penalty(self, W, H) -> float:
+        if self.orientation == "dir-beta":
+            return _beta_neglogprior(W, self.alpha, self.beta)
+        else:
+            return _beta_neglogprior(H, self.alpha, self.beta)
+
     def fit(self, X, y=None, *, mask=None):
         """
         Fit NBMF-MM to X with optional observation mask.
+        Records the full MAP objective (NLL + negative Beta log-prior).
         """
         eps = 1e-9
         X, mask = _check_inputs(
@@ -362,12 +390,10 @@ class BernoulliNMF_MM(BaseEstimator, TransformerMixin):
         M, N = X.shape
         K = self.n_components
 
-        # Choose projection operators
         self._select_projection_ops()
-
         rng = check_random_state(self.random_state) if _HAS_SKLEARN else np.random.default_rng(self.random_state)
 
-        best_nll = np.inf
+        best_obj = np.inf
         best = None
 
         for run in range(max(1, int(self.n_init))):
@@ -401,19 +427,20 @@ class BernoulliNMF_MM(BaseEstimator, TransformerMixin):
 
                 V = _clip01(W @ H, eps)
                 nll = _bern_nll_masked(X, V, mask=mask, eps=eps)
-                obj_hist.append(nll)
+                obj = nll + self._prior_penalty(W, H)
+                obj_hist.append(obj)
 
                 if self.verbose and (it % 50 == 0 or it == self.max_iter - 1):
-                    print(f"[run {run+1}] iter {it:5d}  NLL={nll:.6f}")
+                    print(f"[run {run+1}] iter {it:5d}  MAP={obj:.6f}  (NLL={nll:.6f})")
 
                 if prev < np.inf:
-                    rel = abs(prev - nll) / (prev + 1e-12)
+                    rel = abs(prev - obj) / (prev + 1e-12)
                     if rel < self.tol:
                         break
-                prev = nll
+                prev = obj
 
-            if nll < best_nll:
-                best_nll = nll
+            if obj < best_obj:
+                best_obj = obj
                 best = (W.astype(self.dtype, copy=False), H.astype(self.dtype, copy=False), it + 1, obj_hist)
 
         self.W_, self.components_, self.n_iter_, self.objective_history_ = best
@@ -486,7 +513,6 @@ class BernoulliNMF_MM(BaseEstimator, TransformerMixin):
         eps = 1e-9
         X = _to_dense(X).astype(self.dtype, copy=False)
         mask = None if mask is None else _to_dense(mask).astype(self.dtype, copy=False)
-        # quick one-step update for speed
         W = self.transform(X, mask=mask, max_iter=1)
         V = self.inverse_transform(W)
         nll = _bern_nll_masked(X, V, mask=mask, eps=eps)
