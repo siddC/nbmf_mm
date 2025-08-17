@@ -20,18 +20,6 @@ left-out entries in the likelihood and updates.
 
 Scikit-learn-style estimator: BernoulliNMF_MM(BaseEstimator, TransformerMixin)
 
-Notes on the objective:
-  The MM monotonicity guarantee in Magron & Févotte (2022) is for the MAP
-  objective (negative log-likelihood + negative log-prior on the Beta-
-  constrained factor), not the likelihood alone. We therefore track and use
-  the full MAP objective in `objective_history_` and for convergence.
-
-Simplex projection:
-  Default uses the Duchi et al. (ICML 2008) Euclidean projection ("duchi").
-  Users may select the legacy "normalize" method (threshold + L1 renorm),
-  which follows the original MM derivation for simplex steps and ensures
-  monotone decrease of the MAP objective.
-
 References:
   - P. Magron & C. Févotte (2022), A majorization-minimization algorithm for
     nonnegative binary matrix factorization. IEEE SPL. arXiv:2204.09741.
