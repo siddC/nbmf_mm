@@ -74,6 +74,48 @@ except Exception:
         return np.random.default_rng(seed)
     _HAS_SKLEARN = False
 
+import re
+
+def _canonical_orientation(value: str | None) -> str:
+    """
+    Map user-friendly, case-insensitive names to canonical {'dir-beta','beta-dir'}.
+    Raise later for 'dir-dir' (unsupported) during input validation.
+
+    Accepted aliases:
+      Dir-Beta:   "dir-beta", "dir beta", "aspect bernoulli"
+      Beta-Dir:   "beta-dir", "beta dir", "binary ica", "bica"
+      Dir-Dir:    "dir-dir",  "dir dir",  "binary lda", "blda"  (unsupported)
+
+    Returns the canonical hyphenated label if recognized; otherwise a normalized
+    lowercase token string (so the validator can error with a helpful message).
+    """
+    if value is None:
+        return "dir-beta"
+    s = " ".join(re.sub(r"[^a-zA-Z]+", " ", str(value)).lower().split())  # normalize
+    alias = {
+        "dir beta": "dir-beta",
+        "aspect bernoulli": "dir-beta",
+        "beta dir": "beta-dir",
+        "binary ica": "beta-dir",
+        "bica": "beta-dir",
+        "dir dir": "dir-dir",
+        "binary lda": "dir-dir",
+        "blda": "dir-dir",
+    }
+    if s in alias:
+        return alias[s]
+    # Accept canonical hyphenated forms and concatenations
+    hy = s.replace(" ", "-")
+    if hy in {"dir-beta", "beta-dir", "dir-dir"}:
+        return hy
+    if s in {"dirbeta", "aspectbernoulli"}:
+        return "dir-beta"
+    if s in {"betadir", "binaryica"}:
+        return "beta-dir"
+    if s in {"dirdir", "binarylda"}:
+        return "dir-dir"
+    return s  # unrecognized; validator will raise
+
 
 def _is_sparse(X) -> bool:
     return _HAS_SPARSE and sp.issparse(X)
@@ -106,9 +148,22 @@ def _check_inputs(
         raise ValueError("n_components must be >= 1.")
     if np.any(np.asarray(alpha) <= 0) or np.any(np.asarray(beta) <= 0):
         raise ValueError("alpha and beta must be > 0.")
+    # Canonicalize & validate orientation
+    orientation = _canonical_orientation(orientation)
+    if orientation == "dir-dir":
+        raise ValueError(
+            'orientation "dir-dir" (aka "binary LDA"/"bLDA") is not supported '
+            'by NBMF-MM. Use "dir-beta" (aka "Aspect Bernoulli") or '
+            '"beta-dir" (aka "binary ICA").'
+        )
     if orientation not in ("dir-beta", "beta-dir"):
-        raise ValueError('orientation must be "dir-beta" or "beta-dir".')
-    return X, mask
+        raise ValueError(
+            'orientation must be "dir-beta" or "beta-dir". '
+            'Recognized aliases: '
+            'dir-beta => {"Dir-Beta","Dir Beta","Aspect Bernoulli"}; '
+            'beta-dir => {"Beta-Dir","Beta Dir","Binary ICA","bICA"}.'
+        )
+
 
 
 def _bern_nll_masked(X, P, mask=None, eps=1e-9) -> float:
@@ -257,7 +312,7 @@ class BernoulliNMF_MM(BaseEstimator, TransformerMixin):
         verbose: int = 0,
     ):
         self.n_components = n_components
-        self.orientation = orientation
+        self.orientation = _canonical_orientation(orientation)
         self.alpha = alpha
         self.beta = beta
         self.max_iter = max_iter
