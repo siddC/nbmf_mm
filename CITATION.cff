@@ -33,3 +33,26 @@ references:
         given-names: Cédric
     year: 2018
     url: "https://arxiv.org/abs/1812.06866"
+  - type: article
+    title: Efficient projections onto the l1-ball for learning in high dimensions
+    authors:
+      - given-names: John
+        family-names: Duchi
+      - given-names: Shai
+        family-names: Shalev-Shwartz
+      - given-names: Yoram
+        family-names: Singer
+      - given-names: Tushar
+        family-names: Chandra
+    year: 2008
+    doi: 10.1145/1390156.1390191
+    publisher: ACM
+  - type: article
+    title: Projection onto the probability simplex: An efficient algorithm with a simple proof, and an application
+    authors:
+      - given-names: Weiran
+        family-names: Wang
+      - given-names: Miguel Á.
+        family-names: Carreira-Perpiñán
+    year: 2013
+    url: https://arxiv.org/abs/1309.1541
