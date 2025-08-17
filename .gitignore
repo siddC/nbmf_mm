@@ -1,0 +1,60 @@
+# Python-specific ignores
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+ENV/
+.venv/
+*.env
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Virtual environment
+.env/
+.venv/
+env/
+venv/
+ENV/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# Testing and coverage
+.coverage
+coverage.xml
+*.cover
+*.cache
+nosetests.xml
+pytest_cache/
+
+# Build and distribution
+build/
+dist/
+*.egg-info/
+*.egg
+*.whl
+
+# Jupyter notebooks
+*.ipynb_checkpoints/
+
+# Logs and temporary files
+*.log
+*.log.*
+*.tmp
+*.bak
+*.swp
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Package-specific
+.tox/
+.mypy_cache/
+.pypirc
