@@ -1,6 +1,6 @@
 # NBMF‑MM
 
-[![CI](https://github.com/siddC/nbmf_mm/actions/workflows/ci.yml/badge.svg)](https://github.com/siddC/nbmf_mm/actions/workflows/ci.yml)
+[![CI](https://github.com/siddC/nbmf_mm/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/siddC/nbmf_mm/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE.md)
 ![Python versions](https://img.shields.io/badge/python-3.9–3.12-blue)
 
