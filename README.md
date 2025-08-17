@@ -52,3 +52,25 @@ Xhat = model.inverse_transform(W)  # probabilities in (0,1)
 X_new = (rng.random((10, 500)) < 0.25).astype(float)
 W_new = model.transform(X_new)     # shape (10, n_components)
 ```
+
+### Masking / hold-out
+```python
+mask = (rng.random(X.shape) < 0.9).astype(float)  # observe 90% entries
+model = NBMF(n_components=20, orientation="dir-beta").fit(X, mask=mask)
+
+# fast metrics
+print("score (−NLL per obs):", model.score(X, mask=mask))
+print("perplexity:", model.perplexity(X, mask=mask))
+```
+
+## Command-line (CLI)
+```bash
+nbmf-mm fit \
+  --input X.npz --rank 30 \
+  --orientation dir-beta --alpha 1.2 --beta 1.2 \
+  --max-iter 2000 --tol 1e-6 --seed 0 \
+  --mask train_mask.npz \
+  --out model_rank30.npz
+```
+Outputs W, H, Xhat, objective_history, and summary metrics.
+
