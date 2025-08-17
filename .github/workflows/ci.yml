@@ -50,11 +50,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up pixi
+      # Avoid the action auto-running 'pixi install' so we can see verbose logs
+      - name: Set up pixi (no auto install)
         uses: prefix-dev/setup-pixi@v0
+        with:
+          run-install: false
 
-      - name: Solve env
-        run: pixi install
+      - name: Solve env (verbose)
+        run: pixi -v install
+
+      - name: Install package into pixi env (editable)
+        run: pixi run install
 
       - name: Run tests (pixi)
         run: pixi run test

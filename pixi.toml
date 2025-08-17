@@ -1,31 +1,51 @@
 # pixi.toml — dev environment & tasks for NBMF-MM
+# Usage:
+#   pixi install
+#   pixi run install   # installs your package (editable) inside the pixi env
+#   pixi run test
+#   pixi run build
+
 [project]
 name = "nbmf-mm-dev"
 version = "0.0.0"
 description = "Dev environment for NBMF-MM"
 channels = ["conda-forge"]
-platforms = ["linux-64", "osx-64", "osx-arm64", "win-64"]
+# Keep it simple for CI; expand later if you want multi-platform locking
+platforms = ["linux-64"]
 
 [dependencies]
 python = ">=3.9,<3.13"
+pip = "*"        # ensure pip is present in the pixi/conda env
 numpy = "*"
 scipy = "*"
 
 [pypi-dependencies]
-nbmf-mm = { path = ".", editable = true }
-scikit-learn = "*"
-numexpr = "*"
-numba = "*"
+# Dev/test tools (pypi-managed by pixi)
 pytest = "*"
 pytest-cov = "*"
 ruff = "*"
 mypy = "*"
+numexpr = "*"
+numba = "*"
+scikit-learn = "*"
 uv = "*"
 
 [tasks]
+# Install your package in editable mode inside the pixi env
+install = "python -m pip install -e ."
+
+# Run test suite
 test = "pytest -q"
+
+# Lint & format
 lint = "ruff check ."
 fmt = "ruff format ."
+
+# Type check
 types = "mypy --ignore-missing-imports src/nbmf_mm"
+
+# Build sdist+wheel using uv inside the pixi env
 build = "uv build"
+
+# Publish (requires PYPI_TOKEN in env)
 publish = "uv publish"
