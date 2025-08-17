@@ -9,8 +9,8 @@ description = "Mean-parameterized Bernoulli (Binary) Matrix Factorization via Ma
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
-authors = [{ name = "Your Name", email = "you@example.com" }]
-keywords = ["nmf", "matrix factorization", "bernoulli", "binary", "mm", "probabilistic", "dimensionality reduction"]
+authors = [{ name = "Siddharth M. Chauhan", email = "github.chauhan.siddharth@gmail.com" }]
+keywords = ["nmf", "nbmf", "matrix factorization", "bernoulli", "binary", "mm", "Majorization-Minimization", "probabilistic", "dimensionality reduction"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
@@ -30,27 +30,19 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/your-org/nbmf-mm"
-"Bug Tracker" = "https://github.com/your-org/nbmf-mm/issues"
-
-[project.optional-dependencies]
-sklearn = ["scikit-learn>=1.2"]   # only for optional NNDSVD warm start
-repro   = [
-  "pyreadr>=0.4.4",              # load .rda datasets (Magron & Févotte)
-  "matplotlib>=3.5",
-  "rpy2>=3.5; platform_system!='Windows'"
-]
-dev = [
-  "pytest>=7.0",
-  "pytest-cov>=4.0",
-  "ruff>=0.4.0",
-  "mypy>=1.6.0"
-]
+Homepage = "https://github.com/siddC/nbmf_mm"
+Issues = "https://github.com/siddC/nbmf_mm/issues"
+Documentation = "https://nbmf-mm.readthedocs.io"
 
 [tool.setuptools.packages.find]
-where = ["src"]                   # <— discover packages from ./src
-namespaces = false
+where = ["src"]
+include = ["nbmf_mm*"]
+
+[project.optional-dependencies]
+sklearn = ["scikit-learn>=1.2"]
+dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.4", "mypy>=1.7"]
+docs = ["mkdocs>=1.5", "mkdocstrings[python]>=0.24"]
 
 [tool.pytest.ini_options]
+addopts = "-q"
 testpaths = ["tests"]
-addopts = ["-q", "--import-mode=importlib"]  # modern import mode, avoids sys.path hacks
