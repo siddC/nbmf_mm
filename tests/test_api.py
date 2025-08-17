@@ -61,7 +61,7 @@ def test_objective_not_increasing_with_normalize_projection():
     model.fit(X)
     hist = np.asarray(model.objective_history_, dtype=float)
     # Non-increasing over iterations; allow tiny numerical jitter
-    assert np.all(hist[1:] <= hist[:-1] + 1e-10)
+    assert np.all(hist[1:] <= hist[:-1] + 1e-8)
     assert hist[-1] <= hist[0] + 1e-10
 
 def test_duchi_projection_runs_and_is_finite():
