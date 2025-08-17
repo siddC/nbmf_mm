@@ -91,9 +91,9 @@ def _broadcast_hparam(z, name: str, K: int, dtype) -> np.ndarray:
 
 def _normalize_orientation(s: str) -> str:
     key = str(s).strip().lower()
-    ab = {"aspect bernoulli", "ab", "dir-beta", "dirichlet-beta", "dirichlet–beta", "dir – beta"}
-    bica = {"binary ica", "bica", "beta-dir", "beta‑dir", "beta‑dirichlet", "beta-dirichlet"}
-    blda = {"binary lda", "blda", "dir-dir", "dirichlet-dirichlet", "dirichlet–dirichlet", "dir – dir"}
+    ab = {"aspect bernoulli", "ab", "dir-beta", "dirichlet-beta", "dirichlet-beta", "dir – beta"}
+    bica = {"binary ica", "bica", "beta-dir", "beta-dir", "beta-dirichlet", "beta-dirichlet"}
+    blda = {"binary lda", "blda", "dir-dir", "dirichlet-dirichlet", "dirichlet-dirichlet", "dir – dir"}
     if key in ab: return "dir-beta"
     if key in bica: return "beta-dir"
     if key in blda: return "dir-dir"
@@ -106,11 +106,11 @@ def _normalize_orientation(s: str) -> str:
 
 class BernoulliNMF_MM:
     """
-    Mean‑parameterized Bernoulli NMF via MM (NBMF‑MM), scikit‑learn style.
+    Mean-parameterized Bernoulli NMF via MM (NBMF-MM), scikit-learn style.
 
     Factorizes a binary/[0,1] matrix X ∈ R^{M×N} as W ∈ R_+^{M×K}, H ∈ R_+^{K×N}
     with mean parameter X̂ = W @ H ∈ [0,1]^{M×N}. One factor is constrained to be
-    row/column‑simplex (Dirichlet‑like), the other gets a Beta(α,β) prior.
+    row/column-simplex (Dirichlet-like), the other gets a Beta(α,β) prior.
 
     Parameters
     ----------
@@ -134,7 +134,7 @@ class BernoulliNMF_MM:
     random_state : int or numpy.random.Generator, optional
         Seed/Generator for reproducibility.
     verbose : int, default=0
-        >=2 prints per‑iteration objective.
+        >=2 prints per-iteration objective.
     eps : float, default=1e-9
         Numerical epsilon for clipping probabilities/divisions.
     dtype : numpy dtype, default=np.float64
@@ -147,7 +147,7 @@ class BernoulliNMF_MM:
     components_ : (K,N) ndarray
         Learned H. For 'dir-beta', columns sum to 1.
     reconstruction_err_ : float
-        Final (masked) objective value = Bernoulli NLL + Beta negative log‑prior.
+        Final (masked) objective value = Bernoulli NLL + Beta negative log-prior.
     objective_history_ : list[float]
         Objective trajectory.
     n_iter_ : int
@@ -155,10 +155,10 @@ class BernoulliNMF_MM:
 
     Notes
     -----
-    - 'beta-dir' orientation matches Algorithm 1 updates in Magron & Févotte (2022).
+    - 'beta-dir' orientation matches Algorithm 1 updates in Magron & Févotte (2022).
     - Masked training: entries with mask=0 are ignored in R1/R0 statistics and in the
-      NLL; the W‑update normalization uses the number of observed entries per row
-      (masked analogue of Eq. (19) ⇒ Eq. (20)).  # arXiv:2204.09741
+      NLL; the W-update normalization uses the number of observed entries per row
+      (masked analogue of Eq. (19) ⇒ Eq. (20)).  # arXiv:2204.09741
     """
 
     def __init__(self,
@@ -285,8 +285,8 @@ class BernoulliNMF_MM:
                 prev = curr
             return W.astype(self.dtype, copy=False)
 
-        else:  # dir‑beta
-            H = self.components_  # (K,N), column‑simplex
+        else:  # dir-beta
+            H = self.components_  # (K,N), column-simplex
             W = np.clip(rng.random((M, K)), eps, 1.0 - eps)
             prev = np.inf
             for _ in range(max_iter_W):
@@ -357,14 +357,14 @@ class BernoulliNMF_MM:
             R1 = (Mask * Xf) / V
             R0 = (Mask * (1.0 - Xf)) / (1.0 - V)
 
-            # H‑update (closed‑form C/(C+D)) with Beta prior on H
+            # H-update (closed-form C/(C+D)) with Beta prior on H
             WT_R1 = W.T @ R1
             WT_R0 = W.T @ R0
             C = H * WT_R1 + self._alpha_vec
             D = (1.0 - H) * WT_R0 + self._beta_vec
             H = np.clip(C / (C + D), eps, 1.0 - eps)
 
-            # W‑update (multiplicative) + row‑simplex projection
+            # W-update (multiplicative) + row-simplex projection
             W *= (R1 @ H.T) + (R0 @ (1.0 - H).T)
             W /= row_obs  # masked analogue of division by N (Eq. 20 via Eq. 19 with mask)
             W  = _project_rows_to_simplex(W, eps=eps)
