@@ -1,67 +1,25 @@
-# NBMF-MM: Bernoulli Mean-Parameterized Non-negative Binary Matrix Factorization with MM
+# NBMF‑MM
 
-[![PyPI version](https://badge.fury.io/py/nbmf-mm.svg)](https://badge.fury.io/py/nbmf-mm)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![PyPI](https://img.shields.io/pypi/v/nbmf-mm.svg)](https://pypi.org/project/nbmf-mm/)
+[![License](https://img.shields.io/pypi/l/nbmf-mm.svg)](./LICENSE.md)
+[![Python](https://img.shields.io/pypi/pyversions/nbmf-mm.svg)](https://pypi.org/project/nbmf-mm/)
 
-A scikit-learn compatible implementation of Bernoulli mean-parameterized Non-negative Binary Matrix Factorization using Majorization-Minimization (NBMF-MM).
+**NBMF‑MM** is a fast, scikit‑learn‑style implementation of **mean‑parameterized Bernoulli (binary) matrix factorization** using a **Majorization–Minimization (MM)** solver.
+
+- Two orientations (symmetric):
+  - **`orientation="dir-beta"`** (a.k.a. Aspect Bernoulli): **columns of `H`** lie on the simplex; Beta prior on `W`.
+  - **`orientation="beta-dir"`** (a.k.a. Binary ICA): **rows of `W`** lie on the simplex; Beta prior on `H`.
+- **Masked training** for matrix completion / hold‑out validation.
+- Optional acceleration: **NumExpr** (elementwise ops) and **Numba** (simplex projections), if installed.
+
+> **Goal:** provide a fast, robust approximation you can dimension‑sweep in place of fully Bayesian NBMF.
+
+---
 
 ## Installation
 
 ```bash
 pip install nbmf-mm
-```
-
-## Quick Start
-
-```python
-from nbmf_mm import NBMF
-import numpy as np
-
-# Generate sample binary data
-X = np.random.binomial(1, 0.3, size=(100, 50))
-
-# Initialize and fit the model
-nbmf = NBMF(n_components=10, variant="Dir-Beta", random_state=42)
-nbmf.fit(X)
-
-# Get the factorized matrices
-W = nbmf.transform(X)  # Shape: (n_samples, n_components)
-H = nbmf.components_  # Shape: (n_components, n_features)
-
-# Reconstruct the data
-X_reconstructed = W @ H
-```
-
-## Features
-
-- **Scikit-learn compatible**: Seamless integration with scikit-learn pipelines
-- **Efficient MM algorithm**: Fast convergence using Majorization-Minimization
-- **Binary data support**: Optimized for binary matrix factorization
-- **Flexible parameters**: Customizable number of components and convergence criteria
-- **Comprehensive documentation**: Detailed API documentation and examples
-
-## Documentation
-
-For detailed documentation, visit [https://nbmf-mm.readthedocs.io/](https://nbmf-mm.readthedocs.io/)
-
-## Contributing
-
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Citation
-
-If you use this software in your research, please cite:
-
-```bibtex
-@software{nbmf_mm,
-  title={NBMF-MM: Bernoulli Mean-Parameterized Non-negative Binary Matrix Factorization with MM},
-  author={Your Name},
-  year={2024},
-  url={https://github.com/yourusername/nbmf_mm}
-}
-```
+# optional extras
+pip install "nbmf-mm[sklearn]"   # scikit-learn integration (BaseEstimator/TransformerMixin, NNDSVD init)
+pip install "nbmf-mm[docs]"      # docs build
