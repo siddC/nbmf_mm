@@ -334,13 +334,12 @@ class BernoulliNMF_MM(BaseEstimator, TransformerMixin):
         H = _safe_div(C, C + D)
         return np.clip(H, 1e-9, 1.0 - 1e-9)
 
-    def _update_beta_W_mm(self, W, H, R1, R0):
-        # W <- ( W ⊙ (R1 H^T) + (α-1) ) / ( ... + (1-W) ⊙ (R0 (1-H)^T) + (β-1) )
-        a, b = float(self.alpha), float(self.beta)
-        C = W * (R1 @ H.T) + (a - 1.0)
-        D = (1.0 - W) * (R0 @ (1.0 - H).T) + (b - 1.0)
-        W = _safe_div(C, C + D)
-        return np.clip(W, 1e-9, 1.0 - 1e-9)
+def _update_beta_W_mm(self, W, H, R1, R0):
+    a, b = float(self.alpha), float(self.beta)
+    C = W * (R1 @ H.T) + (a - 1.0)
+    D = (1.0 - W) * (R0 @ H.T) + (b - 1.0)  # ✅ correct: absence term uses H when H is simplex
+    W = _safe_div(C, C + D)
+    return np.clip(W, 1e-9, 1.0 - 1e-9)
 
     def _update_simplex_W_mm(self, W, H, R1, R0, M_size, N_size):
         # Paper (Alg.1): W <- W ⊙ (R1 H^T + R0 (1-H)^T) / N
