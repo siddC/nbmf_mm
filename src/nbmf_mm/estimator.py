@@ -18,6 +18,8 @@ Supports two symmetric orientations of the Bernoulli mean factorization X̂ = W 
 An optional binary mask allows training for matrix-completion protocols by ignoring
 left-out entries in the likelihood and updates.
 
+Scikit-learn-style estimator: BernoulliNMF_MM(BaseEstimator, TransformerMixin)
+
 References
 ----------
 - P. Magron & C. Févotte (2022), "A majorization-minimization algorithm for
@@ -25,358 +27,467 @@ References
 """
 
 from __future__ import annotations
-from typing import Optional, Tuple, Union, Literal, Iterable
+
+from typing import Optional, Tuple
+import warnings
+
 import numpy as np
 
-ArrayLike = Union[np.ndarray]
+try:
+    # Optional acceleration for elementwise expressions
+    import numexpr as ne
+    _HAS_NUMEXPR = True
+except Exception:
+    _HAS_NUMEXPR = False
 
-# ---------- small utilities ----------
+try:
+    # Optional acceleration for simplex projection
+    from numba import njit  # type: ignore
+    _HAS_NUMBA = True
+except Exception:
+    _HAS_NUMBA = False
 
-def _rng(seed: Optional[Union[int, np.random.Generator]]) -> np.random.Generator:
-    if isinstance(seed, np.random.Generator):
-        return seed
-    return np.random.default_rng(seed)
+try:
+    import scipy.sparse as sp
+    _HAS_SPARSE = True
+except Exception:
+    _HAS_SPARSE = False
 
-def _project_rows_to_simplex(W: np.ndarray, eps: float = 1e-9) -> np.ndarray:
-    W = np.maximum(W, eps)
-    s = W.sum(axis=1, keepdims=True)
-    bad = (s[:, 0] <= eps)
-    if np.any(bad):
-        W[bad] = 1.0 / W.shape[1]
-        s = W.sum(axis=1, keepdims=True)
-    return W / s
+# scikit-learn integration like UMAP/HDBSCAN
+try:
+    from sklearn.base import BaseEstimator, TransformerMixin
+    from sklearn.utils import check_random_state
+    from sklearn.utils.validation import check_array
+    _HAS_SKLEARN = True
+except Exception:
+    # very small fallback so import still works without sklearn installed
+    class BaseEstimator:  # type: ignore
+        pass
+    class TransformerMixin:  # type: ignore
+        pass
+    def check_random_state(seed):  # type: ignore
+        return np.random.default_rng(seed)
+    def check_array(X, **kwargs):  # type: ignore
+        return np.asarray(X)
+    _HAS_SKLEARN = False
 
-def _project_cols_to_simplex(H: np.ndarray, eps: float = 1e-9) -> np.ndarray:
-    H = np.maximum(H, eps)
-    s = H.sum(axis=0, keepdims=True)
-    bad = (s[0, :] <= eps)
-    if np.any(bad):
-        H[:, bad] = 1.0 / H.shape[0]
-        s = H.sum(axis=0, keepdims=True)
-    return H / s
 
-def _dirichlet_rows(n_rows: int, n_cols: int, rng, concentration: float = 1.0, eps: float = 1e-9) -> np.ndarray:
-    alpha = np.full(n_cols, max(concentration, eps), dtype=np.float64)
-    return _project_rows_to_simplex(rng.dirichlet(alpha, size=n_rows), eps=eps)
+def _is_sparse(X) -> bool:
+    return _HAS_SPARSE and sp.issparse(X)
 
-def _dirichlet_cols(n_rows: int, n_cols: int, rng, concentration: float = 1.0, eps: float = 1e-9) -> np.ndarray:
-    alpha = np.full(n_rows, max(concentration, eps), dtype=np.float64)
-    H = rng.dirichlet(alpha, size=n_cols).T  # (n_rows, n_cols)
-    return _project_cols_to_simplex(H, eps=eps)
 
-def _beta_matrix(n_rows: int, n_cols: int, rng, a: float, b: float, eps: float) -> np.ndarray:
-    X = rng.beta(max(a, eps), max(b, eps), size=(n_rows, n_cols))
-    return np.clip(X, eps, 1.0 - eps)
+def _to_dense(X):
+    if _is_sparse(X):
+        return X.toarray()
+    return np.asarray(X)
 
-def _safe_bern_nll(X: np.ndarray, V: np.ndarray, mask: Optional[np.ndarray], eps: float) -> float:
-    Vc = np.clip(V, eps, 1.0 - eps)
+
+def _clip01(A, eps: float) -> np.ndarray:
+    return np.clip(A, eps, 1.0 - eps, out=A)
+
+
+def _check_inputs(
+    X, mask, alpha, beta, n_components: int, orientation: str, eps: float
+) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+    X = _to_dense(X).astype(np.float64, copy=False)
+    if np.any((X < -eps) | (X > 1 + eps)):
+        raise ValueError("X must be in [0,1] (binary or probabilities).")
+
+    if mask is not None:
+        mask = _to_dense(mask).astype(np.float64, copy=False)
+        if mask.shape != X.shape:
+            raise ValueError("mask shape must match X.")
+        if np.any((mask < -eps) | (mask > 1 + eps)):
+            raise ValueError("mask must be binary or in [0,1].")
+    if n_components < 1:
+        raise ValueError("n_components must be >= 1.")
+    if np.any(np.asarray(alpha) <= 0) or np.any(np.asarray(beta) <= 0):
+        raise ValueError("alpha and beta must be > 0.")
+    if orientation not in ("dir-beta", "beta-dir"):
+        raise ValueError('orientation must be "dir-beta" or "beta-dir".')
+    return X, mask
+
+
+def _bern_nll_masked(X, P, mask=None, eps=1e-9) -> float:
+    P = np.clip(P, eps, 1.0 - eps)
     if mask is None:
-        return float(-(X * np.log(Vc) + (1.0 - X) * np.log(1.0 - Vc)).sum())
-    M = mask.astype(X.dtype)
-    return float(-((M * X) * np.log(Vc) + (M * (1.0 - X)) * np.log(1.0 - Vc)).sum())
+        return float(-(X * np.log(P) + (1.0 - X) * np.log(1.0 - P)).sum())
+    M = mask
+    return float(-((M * X) * np.log(P) + (M * (1.0 - X)) * np.log(1.0 - P)).sum())
 
-def _safe_beta_neglogprior(Z: np.ndarray, alpha_vec: np.ndarray, beta_vec: np.ndarray, eps: float) -> float:
-    Zc = np.clip(Z, eps, 1.0 - eps)
-    return float(-(((alpha_vec - 1.0) * np.log(Zc)) + ((beta_vec - 1.0) * np.log(1.0 - Zc))).sum())
 
-def _broadcast_hparam(z, name: str, K: int, dtype) -> np.ndarray:
-    z = np.asarray(z, dtype=dtype).reshape(-1)
-    if z.size == 1:
-        out = np.full((K, 1), float(z.item()), dtype=dtype)
-    elif z.size == K:
-        out = z.reshape((K, 1)).astype(dtype, copy=False)
-    else:
-        raise ValueError(f"{name!r} must be scalar or have length n_components.")
-    return out
+def _safe_div(num, den, eps=1e-12):
+    return num / (den + eps)
 
-def _normalize_orientation(s: str) -> str:
-    key = str(s).strip().lower()
-    ab = {"aspect bernoulli", "ab", "dir-beta", "dirichlet-beta", "dirichlet-beta", "dir – beta"}
-    bica = {"binary ica", "bica", "beta-dir", "beta-dir", "beta-dirichlet", "beta-dirichlet"}
-    blda = {"binary lda", "blda", "dir-dir", "dirichlet-dirichlet", "dirichlet-dirichlet", "dir – dir"}
-    if key in ab: return "dir-beta"
-    if key in bica: return "beta-dir"
-    if key in blda: return "dir-dir"
-    # accept the canonical tags as-is
-    if key in {"dir-beta", "beta-dir"}:
-        return key
-    raise ValueError(f"Unknown orientation {s!r}.")
 
-# ---------- estimator ----------
+# --- Simplex projections (Duchi et al. 2008) ---------------------------------
 
-class BernoulliNMF_MM:
+if _HAS_NUMBA:
+
+    @njit(cache=True, fastmath=True)
+    def _project_simplex_row_numba(v):
+        """
+        Project 1D array v onto probability simplex.
+        """
+        u = np.sort(v)[::-1]
+        cssv = np.cumsum(u)
+        rho = -1
+        theta = 0.0
+        for j in range(len(u)):
+            t = (cssv[j] - 1.0) / (j + 1)
+            if u[j] - t > 0:
+                rho = j
+                theta = t
+        w = np.maximum(v - theta, 0.0)
+        return w
+
+    @njit(cache=True, fastmath=True)
+    def _project_rows_simplex_numba(W):
+        M, K = W.shape
+        out = np.empty_like(W)
+        for m in range(M):
+            out[m, :] = _project_simplex_row_numba(W[m, :])
+        return out
+
+else:
+    def _project_rows_simplex_numba(W):
+        # pure numpy fallback
+        M, K = W.shape
+        out = np.empty_like(W)
+        for m in range(M):
+            v = W[m, :]
+            u = np.sort(v)[::-1]
+            cssv = np.cumsum(u)
+            j = np.arange(1, K + 1)
+            t = (cssv - 1.0) / j
+            # find rho = max { j | u_j - t_j > 0 }
+            rho = np.nonzero(u - t > 0)[0]
+            rho = rho[-1] if rho.size else 0
+            theta = t[rho]
+            out[m, :] = np.maximum(v - theta, 0.0)
+        return out
+
+
+def _project_cols_simplex(H):
+    # project columns by transposing, using row projection
+    return _project_rows_simplex_numba(H.T).T
+
+
+# --- Initialization -----------------------------------------------------------
+
+def _rand_beta(shape, alpha, beta, rng: np.random.Generator, eps: float) -> np.ndarray:
+    A = rng.gamma(alpha, 1.0, size=shape)
+    B = rng.gamma(beta, 1.0, size=shape)
+    Z = A / (A + B + eps)
+    return np.clip(Z, eps, 1.0 - eps)
+
+
+def _init_factors(
+    X: np.ndarray,
+    K: int,
+    orientation: str,
+    alpha: float,
+    beta: float,
+    rng: np.random.Generator,
+    eps: float,
+) -> Tuple[np.ndarray, np.ndarray]:
+    M, N = X.shape
+    if orientation == "dir-beta":
+        # H: columns on simplex; W: Beta(α,β)
+        H = rng.random((K, N))
+        H = _project_cols_simplex(H)
+        W = _rand_beta((M, K), alpha, beta, rng, eps)
+    else:  # "beta-dir"
+        # W: rows on simplex; H: Beta(α,β)
+        W = rng.random((M, K))
+        W = _project_rows_simplex_numba(W)
+        H = _rand_beta((K, N), alpha, beta, rng, eps)
+    return W, H
+
+
+# --- Estimator ----------------------------------------------------------------
+
+class BernoulliNMF_MM(BaseEstimator, TransformerMixin):
     """
-    Mean-parameterized Bernoulli NMF via MM (NBMF-MM), scikit-learn style.
-
-    Factorizes a binary/[0,1] matrix X ∈ R^{M×N} as W ∈ R_+^{M×K}, H ∈ R_+^{K×N}
-    with mean parameter X̂ = W @ H ∈ [0,1]^{M×N}. One factor is constrained to be
-    row/column-simplex (Dirichlet-like), the other gets a Beta(α,β) prior.
+    Mean-parameterized Bernoulli (Binary) Matrix Factorization via MM.
 
     Parameters
     ----------
     n_components : int
-        Factorization rank K.
-    alpha, beta : float or array-like of length K, default=1.0
-        Beta prior parameters for the factor carrying the Beta prior; broadcast if scalar.
-    orientation : str, default='dir-beta'
-        Which factor is simplex‑constrained:
-          - 'dir-beta' (Aspect Bernoulli; **default**): H columns on simplex, Beta prior on W.
-          - 'beta-dir'  (binary ICA): W rows on simplex,     Beta prior on H.
-          - 'dir-dir'   (binary LDA): **not supported** here; raises NotImplementedError.
-        Synonyms accepted (case‑insensitive): {"Aspect Bernoulli","AB","Dir-Beta",...}
-        and {"binary ICA","bICA","Beta-Dir",...}.
-    init : {'random','nndsvd','custom'}, default='random'
-        Factor initialization strategy; 'nndsvd' uses sklearn NMF then projects/clips.
-    max_iter : int, default=200
-        Maximum alternating MM iterations.
-    tol : float, default=1e-4
-        Relative tolerance on objective decrease for early stopping.
-    random_state : int or numpy.random.Generator, optional
-        Seed/Generator for reproducibility.
+        Rank K.
+    orientation : {"dir-beta","beta-dir"}, default="dir-beta"
+        Which factor is simplex-constrained vs Beta-constrained.
+    alpha, beta : float, default=1.2
+        Beta prior hyperparameters for the Beta-constrained factor.
+    max_iter : int, default=2000
+        Maximum MM iterations.
+    tol : float, default=1e-6
+        Relative tolerance on NLL for convergence.
+    n_init : int, default=1
+        Number of restarts; best (lowest NLL) is kept.
+    random_state : int|None, default=None
+        RNG seed.
+    use_numexpr : bool, default=True
+        Use NumExpr for elementwise expressions, if available.
+    use_numba : bool, default=True
+        Use Numba-accelerated simplex projection, if available.
+    dtype : {np.float64, np.float32}, default=np.float64
+        Computation dtype.
     verbose : int, default=0
-        >=2 prints per-iteration objective.
-    eps : float, default=1e-9
-        Numerical epsilon for clipping probabilities/divisions.
-    dtype : numpy dtype, default=np.float64
-        Internal floating dtype.
+        Verbosity level.
 
     Attributes
     ----------
-    W_ : (M,K) ndarray
-        Learned W. For 'beta-dir', rows sum to 1.
-    components_ : (K,N) ndarray
-        Learned H. For 'dir-beta', columns sum to 1.
-    reconstruction_err_ : float
-        Final (masked) objective value = Bernoulli NLL + Beta negative log-prior.
-    objective_history_ : list[float]
-        Objective trajectory.
+    components_ : ndarray of shape (K, N)
+        Learned `H` (basis).
+    W_ : ndarray of shape (M, K)
+        Learned `W` (loadings).
     n_iter_ : int
-        Number of iterations run.
-
-    Notes
-    -----
-    - 'beta-dir' orientation matches Algorithm 1 updates in Magron & Févotte (2022).
-    - Masked training: entries with mask=0 are ignored in R1/R0 statistics and in the
-      NLL; the W-update normalization uses the number of observed entries per row
-      (masked analogue of Eq. (19) ⇒ Eq. (20)).  # arXiv:2204.09741
+        Iterations run for the best initialization.
+    objective_history_ : list[float]
+        NLL per iteration for the best initialization.
     """
 
-    def __init__(self,
-                 n_components: int,
-                 *,
-                 alpha: Union[float, ArrayLike] = 1.0,
-                 beta:  Union[float, ArrayLike] = 1.0,
-                 orientation: str = "dir-beta",
-                 init: str = "random",
-                 max_iter: int = 200,
-                 tol: float = 1e-4,
-                 random_state: Optional[Union[int, np.random.Generator]] = None,
-                 verbose: int = 0,
-                 eps: float = 1e-9,
-                 dtype=np.float64):
-        if not isinstance(n_components, (int, np.integer)) or n_components <= 0:
-            raise ValueError("n_components must be a positive integer.")
-        self.n_components = int(n_components)
+    def __init__(
+        self,
+        n_components: int = 10,
+        *,
+        orientation: str = "dir-beta",
+        alpha: float = 1.2,
+        beta: float = 1.2,
+        max_iter: int = 2000,
+        tol: float = 1e-6,
+        n_init: int = 1,
+        random_state: Optional[int] = None,
+        use_numexpr: bool = True,
+        use_numba: bool = True,
+        dtype=np.float64,
+        verbose: int = 0,
+    ):
+        self.n_components = n_components
+        self.orientation = orientation
         self.alpha = alpha
         self.beta = beta
-        self.orientation = orientation
-        self.init = init
-        self.max_iter = int(max_iter)
-        self.tol = float(tol)
+        self.max_iter = max_iter
+        self.tol = tol
+        self.n_init = n_init
         self.random_state = random_state
-        self.verbose = int(verbose)
-        self.eps = float(eps)
+        self.use_numexpr = use_numexpr
+        self.use_numba = use_numba
         self.dtype = dtype
+        self.verbose = verbose
 
-        # learned
-        self.W_: Optional[np.ndarray] = None
-        self.components_: Optional[np.ndarray] = None
-        self.reconstruction_err_: float = np.nan
-        self.objective_history_: list[float] = []
-        self.n_iter_: int = 0
+    # --- core math helpers (vectorized) --------------------------------------
 
-    # ---- API ----
+    def _stats(self, X, V, mask):
+        # Compute masked ratios: R1 = (M*X)/V ; R0 = (M*(1-X))/(1-V)
+        if self.use_numexpr and _HAS_NUMEXPR:
+            M = 1.0 if mask is None else mask
+            R1 = ne.evaluate("(M*X)/V")
+            R0 = ne.evaluate("(M*(1.0 - X))/(1.0 - V)")
+        else:
+            M = 1.0 if mask is None else mask
+            R1 = _safe_div(M * X, V)
+            R0 = _safe_div(M * (1.0 - X), (1.0 - V))
+        return R1, R0
 
-    def fit(self, X: ArrayLike, y=None,
-            *,
-            mask: Optional[ArrayLike] = None,
-            W_init: Optional[ArrayLike] = None,
-            H_init: Optional[ArrayLike] = None):
-        """Fit the model.
+    def _update_beta_factor(self, C, D):
+        # Closed-form Bernoulli-Beta MM update: Z <- (C + a - 1) / (C + D + a + b - 2)
+        a, b = float(self.alpha), float(self.beta)
+        Z = (C + (a - 1.0)) / (C + D + (a + b - 2.0) + 1e-12)
+        return np.clip(Z, 1e-9, 1.0 - 1e-9)
+
+    def _update_simplex_rows(self, W, num, den):
+        W = W * _safe_div(num, den)
+        if self.use_numba and _HAS_NUMBA:
+            return _project_rows_simplex_numba(W)
+        return _project_rows_simplex_numba(W)  # numpy fallback is same name
+
+    def _update_simplex_cols(self, H, num, den):
+        H = H * _safe_div(num, den)
+        return _project_cols_simplex(H)
+
+    # --- public API -----------------------------------------------------------
+
+    def fit(self, X, y=None, *, mask=None):
+        """
+        Fit NBMF-MM to X with optional observation mask.
 
         Parameters
         ----------
-        X : array-like of shape (M,N)
-            Binary or [0,1]-valued matrix.
-        mask : array-like of shape (M,N), optional
-            Binary mask (1 = observed, 0 = ignored) for matrix completion training.
-        W_init, H_init : array-like, optional
-            Custom initial factors (used when init='custom').
+        X : array-like or sparse, shape (n_samples, n_features), values in [0,1]
+        mask : array-like or sparse, optional, same shape as X, values in [0,1]
 
         Returns
         -------
         self
         """
-        Xf = np.asarray(X, dtype=self.dtype, order="C")
-        M, N = Xf.shape
-        Mask = None if mask is None else np.asarray(mask, dtype=self.dtype, order="C")
-        if (Mask is not None) and Mask.shape != (M, N):
-            raise ValueError("mask shape must match X.")
+        eps = 1e-9
+        X, mask = _check_inputs(
+            X, mask, self.alpha, self.beta, self.n_components, self.orientation, eps
+        )
+        X = X.astype(self.dtype, copy=False)
+        mask = None if mask is None else mask.astype(self.dtype, copy=False)
+        M, N = X.shape
+        K = self.n_components
 
-        ori = _normalize_orientation(self.orientation)
+        rng = check_random_state(self.random_state) if _HAS_SKLEARN else np.random.default_rng(self.random_state)
 
-        # broadcast α, β to (K,1)
-        self._alpha_vec = _broadcast_hparam(self.alpha, "alpha", self.n_components, self.dtype)
-        self._beta_vec  = _broadcast_hparam(self.beta,  "beta",  self.n_components, self.dtype)
+        best_nll = np.inf
+        best = None
 
-        rng = _rng(self.random_state)
+        for run in range(max(1, int(self.n_init))):
+            W, H = _init_factors(X, K, self.orientation, self.alpha, self.beta, rng, eps)
+            obj_hist = []
 
-        if ori == "beta-dir":
-            W, H, hist = self._fit_beta_dir_core(Xf, Mask, rng, W_init=W_init, H_init=H_init)
-            self.W_, self.components_, self.objective_history_ = W, H, hist
-        elif ori == "dir-beta":
-            # solve beta‑dir on X^T, then map back
-            Wp, Hp, hist = self._fit_beta_dir_core(
-                Xf.T, None if Mask is None else Mask.T, rng,
-                W_init=None if H_init is None else H_init.T,
-                H_init=None if W_init is None else W_init.T
-            )
-            self.W_ = Hp.T          # Beta on W
-            self.components_ = Wp.T # column‑simplex H
-            self.objective_history_ = hist
-        else:
-            raise NotImplementedError("Dir–Dir ('binary LDA') is not implemented in this MM solver.")
+            prev = np.inf
+            for it in range(int(self.max_iter)):
+                V = _clip01(W @ H, eps)
 
-        self.reconstruction_err_ = float(self.objective_history_[-1]) if self.objective_history_ else np.nan
-        self.n_iter_ = len(self.objective_history_)
+                R1, R0 = self._stats(X, V, mask)
+
+                if self.orientation == "beta-dir":
+                    # Update H (Beta prior)
+                    C = W.T @ R1
+                    D = W.T @ R0
+                    H = self._update_beta_factor(C, D)
+
+                    # Update W (row-simplex)
+                    num = R1 @ H.T
+                    den = R0 @ H.T
+                    W = self._update_simplex_rows(W, num, den)
+
+                else:  # "dir-beta"
+                    # Update W (Beta prior)
+                    C = R1 @ H.T
+                    D = R0 @ H.T
+                    W = self._update_beta_factor(C, D)
+
+                    # Update H (col-simplex)
+                    num = W.T @ R1
+                    den = W.T @ R0
+                    H = self._update_simplex_cols(H, num, den)
+
+                V = _clip01(W @ H, eps)
+                nll = _bern_nll_masked(X, V, mask=mask, eps=eps)
+                obj_hist.append(nll)
+
+                if self.verbose and (it % 50 == 0 or it == self.max_iter - 1):
+                    print(f"[run {run+1}] iter {it:5d}  NLL={nll:.6f}")
+
+                if prev < np.inf:
+                    rel = abs(prev - nll) / (prev + 1e-12)
+                    if rel < self.tol:
+                        break
+                prev = nll
+
+            if nll < best_nll:
+                best_nll = nll
+                best = (W.astype(self.dtype, copy=False), H.astype(self.dtype, copy=False), it + 1, obj_hist)
+
+        self.W_, self.components_, self.n_iter_, self.objective_history_ = best
         return self
 
-    def fit_transform(self, X: ArrayLike, y=None, **fit_kwargs) -> np.ndarray:
-        """Fit and return W (as in scikit‑learn)."""
-        return self.fit(X, **fit_kwargs).W_
+    def fit_transform(self, X, y=None, *, mask=None):
+        """Fit the model and return W."""
+        self.fit(X, mask=mask)
+        return self.W_
 
-    def transform(self, X: ArrayLike, *, max_iter_W: int = 200, tol_W: float = 1e-5) -> np.ndarray:
-        """Given learned components, estimate W for new X (unmasked)."""
-        if self.components_ is None:
-            raise RuntimeError("Call fit() before transform().")
+    def transform(self, X, *, mask=None, max_iter: int = 500, tol: float = 1e-6):
+        """
+        Estimate W for new X with components_ fixed.
 
-        Xf = np.asarray(X, dtype=self.dtype, order="C")
-        M, N = Xf.shape
-        K = self.n_components
-        eps = self.eps
-        rng = _rng(self.random_state)
+        For orientation="beta-dir" (row-simplex W; Beta prior on H),
+        we update W multiplicatively with simplex projection.
 
-        ori = _normalize_orientation(self.orientation)
-        if ori == "beta-dir":
-            H = self.components_
-            W = _project_rows_to_simplex(np.maximum(rng.random((M, K)) * 0.5, eps), eps=eps)
-            prev = np.inf
-            for _ in range(max_iter_W):
-                V  = np.clip(W @ H, eps, 1.0 - eps)
-                R1 = Xf / V
-                R0 = (1.0 - Xf) / (1.0 - V)
-                W *= (R1 @ H.T) + (R0 @ (1.0 - H).T)
-                W /= float(N)
-                W  = _project_rows_to_simplex(W, eps=eps)
-                V  = np.clip(W @ H, eps, 1.0 - eps)
-                curr = _safe_bern_nll(Xf, V, mask=None, eps=eps)
-                if abs(prev - curr) / max(1.0, abs(prev)) < tol_W:
-                    break
-                prev = curr
-            return W.astype(self.dtype, copy=False)
+        For orientation="dir-beta" (Beta prior on W),
+        we use the closed-form Beta update for W.
 
-        else:  # dir-beta
-            H = self.components_  # (K,N), column-simplex
-            W = np.clip(rng.random((M, K)), eps, 1.0 - eps)
-            prev = np.inf
-            for _ in range(max_iter_W):
-                V  = np.clip(W @ H, eps, 1.0 - eps)
-                R1 = Xf / V
-                R0 = (1.0 - Xf) / (1.0 - V)
-                C = W * (R1 @ H.T) + self._alpha_vec.T
-                D = (1.0 - W) * (R0 @ (1.0 - H).T) + self._beta_vec.T
-                W = np.clip(C / (C + D), eps, 1.0 - eps)
-                V  = np.clip(W @ H, eps, 1.0 - eps)
-                curr = _safe_bern_nll(Xf, V, mask=None, eps=eps) + _safe_beta_neglogprior(W, self._alpha_vec.T, self._beta_vec.T, eps)
-                if abs(prev - curr) / max(1.0, abs(prev)) < tol_W:
-                    break
-                prev = curr
-            return W.astype(self.dtype, copy=False)
+        Parameters
+        ----------
+        X : array-like, shape (n_samples, n_features)
+        mask : array-like, optional
+        max_iter : int
+        tol : float
 
-    def inverse_transform(self, W: ArrayLike) -> np.ndarray:
-        """Return mean reconstruction X̂ = W @ H in [0,1]."""
-        if self.components_ is None:
-            raise RuntimeError("Call fit() before inverse_transform().")
-        return np.clip(np.asarray(W, dtype=self.dtype) @ self.components_, self.eps, 1.0 - self.eps)
+        Returns
+        -------
+        W : ndarray, shape (n_samples, n_components)
+        """
+        if not hasattr(self, "components_"):
+            raise AttributeError("Model is not fitted yet.")
+        eps = 1e-9
+        X, mask = _check_inputs(
+            X, mask, self.alpha, self.beta, self.n_components, self.orientation, eps
+        )
+        X = X.astype(self.dtype, copy=False)
+        mask = None if mask is None else mask.astype(self.dtype, copy=False)
 
-    # ---------- core solver for Beta–Dir (binary ICA) ----------
+        H = self.components_
+        M, N = X.shape
+        K = H.shape[0]
 
-    def _fit_beta_dir_core(self, Xf: np.ndarray, Mask: Optional[np.ndarray], rng: np.random.Generator,
-                           W_init: Optional[ArrayLike] = None,
-                           H_init: Optional[ArrayLike] = None) -> Tuple[np.ndarray, np.ndarray, list]:
-        M, N = Xf.shape; K = self.n_components; eps = self.eps; dtype = self.dtype
-
-        # init
-        if self.init == "custom":
-            if W_init is None or H_init is None:
-                raise ValueError("init='custom' requires W_init and H_init.")
-            W = np.asarray(W_init, dtype=dtype, order="C");  H = np.asarray(H_init, dtype=dtype, order="C")
-            if W.shape != (M, K) or H.shape != (K, N):
-                raise ValueError("W_init/H_init shapes are incompatible with X.")
-            W = _project_rows_to_simplex(W, eps=eps);  H = np.clip(H, eps, 1.0 - eps)
-        elif self.init == "nndsvd":
-            try:
-                from sklearn.decomposition import NMF as _SKNMF
-                sk = _SKNMF(n_components=K, init="nndsvd", solver="cd",
-                            beta_loss="frobenius", max_iter=400,
-                            random_state=rng.integers(0, 2**31-1))
-                W0 = sk.fit_transform(Xf); H0 = sk.components_
-                W  = _project_rows_to_simplex(W0.astype(dtype, copy=False), eps=eps)
-                H  = np.clip(H0.astype(dtype, copy=False), eps, 1.0 - eps)
-                q  = np.quantile(H, 0.99, axis=1, keepdims=True); q = np.where(q <= eps, 1.0, q)
-                H  = np.clip(H / q, eps, 1.0 - eps)
-            except Exception:
-                W = _dirichlet_rows(M, K, rng, concentration=1.0, eps=eps).astype(dtype, copy=False)
-                a = float(np.mean(np.asarray(self.alpha))); b = float(np.mean(np.asarray(self.beta)))
-                H = _beta_matrix(K, N, rng, a=a, b=b, eps=eps).astype(dtype, copy=False)
+        rng = check_random_state(self.random_state) if _HAS_SKLEARN else np.random.default_rng(self.random_state)
+        # Good starting point
+        if self.orientation == "beta-dir":
+            W = rng.random((M, K)).astype(self.dtype, copy=False)
+            W = _project_rows_simplex_numba(W)
         else:
-            W = _dirichlet_rows(M, K, rng, concentration=1.0, eps=eps).astype(dtype, copy=False)
-            a = float(np.mean(np.asarray(self.alpha))); b = float(np.mean(np.asarray(self.beta)))
-            H = _beta_matrix(K, N, rng, a=a, b=b, eps=eps).astype(dtype, copy=False)
+            W = _rand_beta((M, K), self.alpha, self.beta, rng, eps).astype(self.dtype, copy=False)
 
-        hist: list[float] = []
         prev = np.inf
+        for it in range(int(max_iter)):
+            V = _clip01(W @ H, eps)
+            R1, R0 = self._stats(X, V, mask)
 
-        # constants for masked updates
-        if Mask is None:
-            Mask = np.ones_like(Xf, dtype=dtype)
-        row_obs = np.maximum(Mask.sum(axis=1, keepdims=True), 1.0)
+            if self.orientation == "beta-dir":
+                num = R1 @ H.T
+                den = R0 @ H.T
+                W = self._update_simplex_rows(W, num, den)
+            else:
+                C = R1 @ H.T
+                D = R0 @ H.T
+                W = self._update_beta_factor(C, D)
 
-        for it in range(1, self.max_iter + 1):
-            V  = np.clip(W @ H, eps, 1.0 - eps)
-            R1 = (Mask * Xf) / V
-            R0 = (Mask * (1.0 - Xf)) / (1.0 - V)
+            V = _clip01(W @ H, eps)
+            nll = _bern_nll_masked(X, V, mask=mask, eps=eps)
+            if prev < np.inf:
+                rel = abs(prev - nll) / (prev + 1e-12)
+                if rel < tol:
+                    break
+            prev = nll
 
-            # H-update (closed-form C/(C+D)) with Beta prior on H
-            WT_R1 = W.T @ R1
-            WT_R0 = W.T @ R0
-            C = H * WT_R1 + self._alpha_vec
-            D = (1.0 - H) * WT_R0 + self._beta_vec
-            H = np.clip(C / (C + D), eps, 1.0 - eps)
+        return W
 
-            # W-update (multiplicative) + row-simplex projection
-            W *= (R1 @ H.T) + (R0 @ (1.0 - H).T)
-            W /= row_obs  # masked analogue of division by N (Eq. 20 via Eq. 19 with mask)
-            W  = _project_rows_to_simplex(W, eps=eps)
+    def inverse_transform(self, W):
+        """Return reconstructed probabilities Xhat = W @ H in (0,1)."""
+        eps = 1e-9
+        H = self.components_
+        V = W @ H
+        return np.clip(V, eps, 1.0 - eps)
 
-            V  = np.clip(W @ H, eps, 1.0 - eps)
-            obj = _safe_bern_nll(Xf, V, mask=Mask, eps=eps) + _safe_beta_neglogprior(H, self._alpha_vec, self._beta_vec, eps)
-            hist.append(float(obj))
+    def score(self, X, *, mask=None) -> float:
+        """Negative NLL per observed entry (higher is better)."""
+        if not hasattr(self, "components_"):
+            raise AttributeError("Model is not fitted yet.")
+        eps = 1e-9
+        X = _to_dense(X).astype(self.dtype, copy=False)
+        mask = None if mask is None else _to_dense(mask).astype(self.dtype, copy=False)
 
-            if self.verbose >= 2:
-                print(f"[it={it:04d}] obj={obj:.6f}")
-            if abs(prev - obj) / max(1.0, abs(prev)) < self.tol:
-                break
-            prev = obj
+        V = self.inverse_transform(self.transform(X, mask=mask, max_iter=1))  # single step approx
+        nll = _bern_nll_masked(X, V, mask=mask, eps=eps)
+        nobs = float(X.size if mask is None else np.sum(mask))
+        return -nll / max(1.0, nobs)
 
-        return W.astype(dtype, copy=False), H.astype(dtype, copy=False), hist
+    def perplexity(self, X, *, mask=None) -> float:
+        """exp(NLL per observed entry). Lower is better."""
+        if not hasattr(self, "components_"):
+            raise AttributeError("Model is not fitted yet.")
+        eps = 1e-9
+        X = _to_dense(X).astype(self.dtype, copy=False)
+        mask = None if mask is None else _to_dense(mask).astype(self.dtype, copy=False)
+
+        V = self.inverse_transform(self.transform(X, mask=mask, max_iter=1))  # single step approx
+        nll = _bern_nll_masked(X, V, mask=mask, eps=eps)
+        nobs = float(X.size if mask is None else np.sum(mask))
+        return float(np.exp(nll / max(1.0, nobs)))
