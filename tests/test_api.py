@@ -44,8 +44,8 @@ def test_fit_shapes_beta_dir():
 
 def test_objective_not_increasing_with_normalize_projection():
     """
-    The MM derivation guarantees monotone decrease when the simplex step
-    is multiplicative-update + L1 renormalization ("normalize" method).
+    MM guarantees monotone decrease for the MAP objective (NLL + Beta prior)
+    when the simplex step is multiplicative + L1 renormalization ("normalize").
     """
     X = _toy_data()
     model = NBMF(
@@ -62,15 +62,13 @@ def test_objective_not_increasing_with_normalize_projection():
     hist = np.asarray(model.objective_history_, dtype=float)
     # Non-increasing over iterations; allow tiny numerical jitter
     assert np.all(hist[1:] <= hist[:-1] + 1e-10)
-    # And final no worse than first recorded
     assert hist[-1] <= hist[0] + 1e-10
 
 def test_duchi_projection_runs_and_is_finite():
     """
-    With Euclidean simplex projection ("duchi") we do not strictly
-    assert monotonicity (projection is outside the original MM majorizer).
-    Instead we assert the objective stays finite and the reconstruction
-    is in-bounds.
+    With Euclidean simplex projection ("duchi") we do not strictly assert
+    monotonicity (projection is outside the original MM majorizer). Instead,
+    assert the objective is finite and reconstructions are in-bounds.
     """
     X = _toy_data()
     model = NBMF(
@@ -79,7 +77,7 @@ def test_duchi_projection_runs_and_is_finite():
         tol=1e-7,
         use_numexpr=False,
         use_numba=False,
-        projection_method="duchi",       # fast default
+        projection_method="duchi",
         projection_backend="numpy",
         random_state=0,
     )
