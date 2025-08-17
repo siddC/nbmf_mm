@@ -188,3 +188,19 @@ def test_objective_not_increasing_with_normalize_projection_beta_dir():
     model.fit(X)
     hist = np.asarray(model.objective_history_, dtype=float)
     assert np.all(hist[1:] <= hist[:-1] + 1e-8)
+
+def test_orientation_aliases_roundtrip():
+    X = (np.random.default_rng(0).random((20, 10)) < 0.3).astype(float)
+    for alias, canon in [
+        ("Dir-Beta", "dir-beta"),
+        ("Aspect Bernoulli", "dir-beta"),
+        ("Dir Beta", "dir-beta"),
+        ("Beta-Dir", "beta-dir"),
+        ("Binary ICA", "beta-dir"),
+        ("bICA", "beta-dir"),
+    ]:
+        m = BernoulliNMF_MM(n_components=3, orientation=alias, max_iter=5, random_state=0)
+        m.fit(X)
+        assert m.orientation == canon
+    with pytest.raises(ValueError):
+        BernoulliNMF_MM(n_components=3, orientation="Dir-Dir").fit(X)
