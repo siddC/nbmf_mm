@@ -1,13 +1,13 @@
 # tests/test_api_basic.py
 import numpy as np
-from nbmf_mm import BernoulliNMF_MM
+from nbmf_mm import NBMF
 
 def test_api_shapes_and_bounds():
     rng = np.random.default_rng(0)
     M, N, K = 30, 20, 5
     X = (rng.random((M, N)) < 0.25).astype(float)
 
-    model = BernoulliNMF_MM(
+    model = NBMF(
         n_components=K,
         alpha=1.5, beta=1.2,
         orientation="Dir-Beta",   # default, case-insensitive alias

@@ -1,6 +1,6 @@
 # tests/test_reproducibility.py
 import numpy as np
-from nbmf_mm import BernoulliNMF_MM
+from nbmf_mm import NBMF
 
 def test_seed_reproducibility_and_variation():
     rng = np.random.default_rng(99)
@@ -8,9 +8,9 @@ def test_seed_reproducibility_and_variation():
 
     kwargs = dict(n_components=4, alpha=1.2, beta=1.2, max_iter=250, tol=1e-6, orientation="dir-beta")
 
-    m1 = BernoulliNMF_MM(random_state=123, **kwargs).fit(X)
-    m2 = BernoulliNMF_MM(random_state=123, **kwargs).fit(X)
-    m3 = BernoulliNMF_MM(random_state=456, **kwargs).fit(X)
+    m1 = NBMF(random_state=123, **kwargs).fit(X)
+    m2 = NBMF(random_state=123, **kwargs).fit(X)
+    m3 = NBMF(random_state=456, **kwargs).fit(X)
 
     # Same seed → very close final objective & reconstruction
     assert abs(m1.reconstruction_err_ - m2.reconstruction_err_) < 1e-8

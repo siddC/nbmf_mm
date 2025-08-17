@@ -310,7 +310,7 @@ def _init_factors(
 
 # -------- Estimator -----------------------------------------------------------
 
-class BernoulliNMF_MM(BaseEstimator, TransformerMixin):
+class NBMF(BaseEstimator, TransformerMixin):
     """
     Mean-parameterized Bernoulli (Binary) Matrix Factorization via MM.
 

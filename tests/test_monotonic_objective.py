@@ -1,12 +1,12 @@
 # tests/test_monotonic_objective.py
 import numpy as np
-from nbmf_mm import BernoulliNMF_MM
+from nbmf_mm import NBMF
 
 def test_mm_objective_monotone_nonincreasing():
     rng = np.random.default_rng(123)
     X = (rng.random((40, 25)) < 0.30).astype(float)
 
-    model = BernoulliNMF_MM(
+    model = NBMF(
         n_components=6,
         alpha=1.1, beta=1.1,
         orientation="dir-beta",

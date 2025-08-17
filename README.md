@@ -42,7 +42,7 @@ pip install "nbmf-mm[docs]"
 
 ```python
 import numpy as np
-from nbmf_mm import NBMF  # alias of BernoulliNMF_MM
+from nbmf_mm import NBMF
 
 rng = np.random.default_rng(0)
 X = (rng.random((100, 500)) < 0.25).astype(float)   # binary {0,1} or probabilities in [0,1]
@@ -89,7 +89,7 @@ Both solve the same Bernoulli mean‑parameterized factorization with different 
 ---
 
 ## API (scikit-learn style)
-- `BernoulliNMF_MM(...).fit(X, mask=None) -> self`
+- `NBMF(...).fit(X, mask=None) -> self`
 - `fit_transform(X, mask=None) -> W`
 - `transform(X, mask=None, max_iter=500, tol=1e-6) -> W` (estimate `W` for new `X` with learned `H` fixed)
 - `inverse_transform(W) -> Xhat` (reconstructed probabilities in (0,1))
