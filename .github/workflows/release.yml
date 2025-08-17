@@ -1,19 +1,19 @@
-name: Release
+name: Release to PyPI (trusted publisher)
 
 on:
-  workflow_dispatch:
   push:
     tags:
       - "v*.*.*"
+  workflow_dispatch:
 
 permissions:
   contents: read
-  id-token: write  # required for Trusted Publishing (OIDC)
+  id-token: write  # REQUIRED for PyPI Trusted Publishing
+  actions: read
 
 jobs:
-  build-and-publish:
+  build:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
@@ -21,21 +21,34 @@ jobs:
         with:
           python-version: "3.11"
 
-      - run: python -m pip install -U build
-      - run: python -m build
+      - name: Install build backend
+        run: python -m pip install --upgrade build
 
-      # --- PyPI publish with OIDC (Trusted Publishing) if no token is set ---
-      - name: Publish to PyPI (OIDC)
-        if: ${{ secrets.PYPI_API_TOKEN == '' || secrets.PYPI_API_TOKEN == null }}
+      - name: Build sdist and wheel
+        run: python -m build --sdist --wheel --outdir dist
+
+      - name: Upload dist/ as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/nbmf-mm/
+    permissions:
+      id-token: write   # REQUIRED
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Publish to PyPI (Trusted Publisher)
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: dist/
-
-      # --- Fallback: PyPI publish using API token if provided ---
-      - name: Publish to PyPI (API token)
-        if: ${{ secrets.PYPI_API_TOKEN != '' && secrets.PYPI_API_TOKEN != null }}
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
-          packages-dir: dist/
           skip-existing: true

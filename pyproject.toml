@@ -1,67 +1,95 @@
 [build-system]
-requires = ["setuptools>=68", "setuptools-scm>=8", "wheel", "numpy>=1.22"]
+requires = ["setuptools>=69", "wheel", "setuptools_scm[toml]>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "nbmf-mm"
-description = "Bernoulli (binary) mean-parameterized NMF (NBMF) with Majorization–Minimization (NBMF-MM)."
-readme = { file = "README.md", content-type = "text/markdown" }
+dynamic = ["version"]
+description = "Bernoulli (binary) mean-parameterized NMF (NBMF) w/ Majorization–Minimization (MM)"
+readme = "README.md"
 requires-python = ">=3.9,<3.13"
 license = { file = "LICENSE" }
-authors = [{ name = "Project contributors" }]
-keywords = ["nmf", "matrix factorization", "bernoulli", "mm", "probabilistic", "dirichlet"]
+authors = [{ name = "Siddharth M. Chauhan", email = "github.chauhan.siddharth@gmail.com" }]
+
+keywords = ["NMF", "Bernoulli", "matrix factorization", "topic modeling", "ICA", "Dirichlet", "Beta"]
 classifiers = [
-  "Development Status :: 4 - Beta",
-  "License :: OSI Approved :: MIT License",
-  "Programming Language :: Python",
-  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
-  "Topic :: Scientific/Engineering :: Information Analysis",
+  "License :: OSI Approved :: MIT License",
   "Intended Audience :: Science/Research",
+  "Topic :: Scientific/Engineering :: Information Analysis",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Scientific/Engineering :: Machine Learning",
 ]
-# We derive the version from git tags via setuptools_scm.
-dynamic = ["version"]
 
-# Runtime dependencies. Keep this minimal & stable.
+# Keep base deps minimal; acceleration is in extras.
 dependencies = [
   "numpy>=1.22",
   "scipy>=1.9",
-  "numexpr>=2.8"
-]
-
-[project.optional-dependencies]
-# Used by tests and development (CI runs `.[dev]` or pixi installs these)
-dev = [
-  "pytest>=7",
-  "pytest-cov>=4",
-  "ruff>=0.5",
-  "mypy>=1.7",
-  "build>=1",
-  "twine>=5",               # only needed for token-based publishing
-  "setuptools-scm>=8",
-]
-docs = [
-  "sphinx>=7",
-  "furo",
+  "scikit-learn>=1.3",
 ]
 
 [project.urls]
 Homepage = "https://github.com/siddC/nbmf_mm"
 Issues   = "https://github.com/siddC/nbmf_mm/issues"
+Repository = "https://github.com/siddC/nbmf_mm"
+
+[project.optional-dependencies]
+# test/developer tooling
+test = [
+  "pytest>=7",
+  "pytest-xdist>=3",
+  "pytest-cov>=4",
+]
+dev = [
+  "nbmf-mm[test]",
+  "build>=1.2",
+  "twine>=5",
+  "ruff>=0.5",
+  "black>=24",
+  "mypy>=1.10",
+  "pre-commit>=3.6",
+]
+
+# Acceleration extras
+accel = [
+  "numexpr>=2.8",
+  # numba is fine via pip on 3.10–3.12; conda is recommended elsewhere
+  "numba>=0.60; python_version>='3.10'",
+]
+
+# Everything EXCEPT the R bridge
+all = [
+  "scikit-learn>=1.3",
+  "numexpr>=2.8",
+  "numba>=0.60; python_version>='3.10'",
+]
+
+# R bridge (requires an external R installation)
+r = ["rpy2>=3.5"]
+
+# Everything INCLUDING the R bridge
+all-r = [
+  "scikit-learn>=1.3",
+  "numexpr>=2.8",
+  "numba>=0.60; python_version>='3.10'",
+  "rpy2>=3.5",
+]
 
 [tool.setuptools]
 package-dir = { "" = "src" }
-zip-safe = false
 
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["nbmf_mm*"]
 
-# setuptools_scm configuration: derive version from tags, and write a file
 [tool.setuptools_scm]
-version_scheme = "guess-next-dev"
-local_scheme = "node-and-date"
+# create a file so editable installs can read __version__ without metadata
 write_to = "src/nbmf_mm/_version.py"
+version_scheme = "no-guess-dev"
+local_scheme = "no-local-version"
+fallback_version = "0.0.0"
