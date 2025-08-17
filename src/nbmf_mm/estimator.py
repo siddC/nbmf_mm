@@ -55,7 +55,7 @@ try:
 except Exception:
     _HAS_SPARSE = False
 
-# scikit-learn integration (as in UMAP/HDBSCAN)
+# scikit-learn integration
 try:
     from sklearn.base import BaseEstimator, TransformerMixin
     from sklearn.utils import check_random_state
@@ -115,11 +115,10 @@ def _bern_nll_masked(X, P, mask=None, eps=1e-9) -> float:
 
 
 def _beta_neglogprior(Z, alpha: float, beta: float, eps: float = 1e-9) -> float:
-    """Negative log-prior for independent Beta(alpha, beta) entries of Z."""
+    """Negative log-prior for independent Beta(alpha, beta) entries of Z (drop constants)."""
     Z = np.clip(Z, eps, 1.0 - eps)
     a = float(alpha)
     b = float(beta)
-    # Drop constants: we only need a monotone proxy for convergence & history.
     return float(-((a - 1.0) * np.log(Z) + (b - 1.0) * np.log(1.0 - Z)).sum())
 
 
@@ -128,7 +127,7 @@ def _safe_div(num, den, eps=1e-12):
 
 
 # -------- Simplex projections -------------------------------------------------
-# Duchi-style projection: O(d log d) via sorting, per row/column.
+# Euclidean projection (Duchi et al., 2008) for the "duchi" path
 
 def _project_rows_simplex_numpy_impl(W: np.ndarray) -> np.ndarray:
     M, K = W.shape
@@ -149,7 +148,6 @@ def _project_cols_simplex_numpy_impl(H: np.ndarray) -> np.ndarray:
     return _project_rows_simplex_numpy_impl(H.T).T
 
 if _HAS_NUMBA:
-    from numba import njit
 
     @njit(cache=True, fastmath=True)
     def _project_simplex_row_numba(v):
@@ -180,7 +178,7 @@ else:
     _project_cols_simplex_numba_impl = _project_cols_simplex_numpy_impl
 
 
-# Legacy “normalize” projection (nonnegative + renormalize)
+# “normalize”: nonnegativity + L1 renormalization helpers (used in fast path too)
 def _normalize_rows_simplex(W: np.ndarray) -> np.ndarray:
     W = np.maximum(W, 0.0)
     s = W.sum(axis=1, keepdims=True)
@@ -215,11 +213,11 @@ def _init_factors(
     M, N = X.shape
     if orientation == "dir-beta":
         H = rng.random((K, N))
-        H = _project_cols_simplex_numpy_impl(H)
+        H = _normalize_cols_simplex(H)  # start on the simplex
         W = _rand_beta((M, K), alpha, beta, rng, eps)
     else:  # "beta-dir"
         W = rng.random((M, K))
-        W = _project_rows_simplex_numpy_impl(W)
+        W = _normalize_rows_simplex(W)
         H = _rand_beta((K, N), alpha, beta, rng, eps)
     return W, H
 
@@ -230,32 +228,9 @@ class BernoulliNMF_MM(BaseEstimator, TransformerMixin):
     """
     Mean-parameterized Bernoulli (Binary) Matrix Factorization via MM.
 
-    Parameters
-    ----------
-    n_components : int, default=10
-    orientation : {"dir-beta","beta-dir"}, default="dir-beta"
-    alpha, beta : float, default=1.2
-    max_iter : int, default=2000
-    tol : float, default=1e-6
-    n_init : int, default=1
-    random_state : int|None, default=None
-    use_numexpr : bool, default=True
-    use_numba : bool, default=True  # kept for backward compat
-    projection_method : {"duchi","normalize"}, default="duchi"
-        "duchi": Euclidean projection to simplex (Duchi et al., 2008).
-        "normalize": legacy behavior (threshold + L1 renorm, MM-faithful).
-    projection_backend : {"auto","numba","numpy"}, default="auto"
-        Backend for the "duchi" method. "auto": prefer numba if available.
-    dtype : {np.float64, np.float32}, default=np.float64
-    verbose : int, default=0
-
-    Attributes
-    ----------
-    components_ : (K, N) ndarray
-    W_ : (M, K) ndarray
-    n_iter_ : int
-    objective_history_ : list[float]
-        Full MAP objective values (NLL + negative Beta log-prior) per outer iter.
+    projection_method:
+        "normalize" -> MM-faithful simplex step per Magron & Févotte (2022);
+        "duchi"     -> Euclidean projection (fast default; not strictly MM-monotone).
     """
 
     def __init__(
@@ -291,7 +266,7 @@ class BernoulliNMF_MM(BaseEstimator, TransformerMixin):
         self.dtype = dtype
         self.verbose = verbose
 
-    # ---- projection selector -------------------------------------------------
+    # ---- projection selectors -------------------------------------------------
 
     def _select_projection_ops(self):
         method = self.projection_method
@@ -301,11 +276,12 @@ class BernoulliNMF_MM(BaseEstimator, TransformerMixin):
             raise ValueError('projection_method must be "duchi" or "normalize".')
 
         if method == "normalize":
+            # we use closed-forms; these helpers are only for safety/fast path
             self._proj_rows = _normalize_rows_simplex
             self._proj_cols = _normalize_cols_simplex
             return
 
-        # "duchi"
+        # "duchi" projection
         if backend == "numba":
             if not _HAS_NUMBA:
                 warnings.warn("projection_backend='numba' requested but numba not installed; "
@@ -328,10 +304,10 @@ class BernoulliNMF_MM(BaseEstimator, TransformerMixin):
         else:
             raise ValueError("projection_backend must be 'auto', 'numba', or 'numpy'.")
 
-    # ---- core math helpers ---------------------------------------------------
+    # ---- math helpers ---------------------------------------------------------
 
     def _stats(self, X, V, mask):
-        # Compute masked ratios: R1 = (M*X)/V ; R0 = (M*(1-X))/(1-V)
+        # R1 = (M*X)/V ; R0 = (M*(1-X))/(1-V)
         if self.use_numexpr and _HAS_NUMEXPR:
             M = 1.0 if mask is None else mask
             R1 = ne.evaluate("(M*X)/V")
@@ -342,27 +318,44 @@ class BernoulliNMF_MM(BaseEstimator, TransformerMixin):
             R0 = _safe_div(M * (1.0 - X), (1.0 - V))
         return R1, R0
 
-    def _update_beta_factor(self, C, D):
-        # Closed-form Bernoulli-Beta MM update: Z <- (C + a - 1) / (C + D + a + b - 2)
-        a, b = float(self.alpha), float(self.beta)
-        Z = (C + (a - 1.0)) / (C + D + (a + b - 2.0) + 1e-12)
-        return np.clip(Z, 1e-9, 1.0 - 1e-9)
-
-    def _update_simplex_rows(self, W, num, den):
-        W = W * _safe_div(num, den)
-        return self._proj_rows(W)
-
-    def _update_simplex_cols(self, H, num, den):
-        H = H * _safe_div(num, den)
-        return self._proj_cols(H)
-
-    # ---- public API ----------------------------------------------------------
-
     def _prior_penalty(self, W, H) -> float:
         if self.orientation == "dir-beta":
             return _beta_neglogprior(W, self.alpha, self.beta)
         else:
             return _beta_neglogprior(H, self.alpha, self.beta)
+
+    # ---- MM update blocks (paper-correct) ------------------------------------
+
+    def _update_beta_H_mm(self, H, W, R1, R0):
+        # H <- ( H ⊙ (W^T R1) + (α-1) ) / ( ... + (1-H) ⊙ (W^T R0) + (β-1) )
+        a, b = float(self.alpha), float(self.beta)
+        C = H * (W.T @ R1) + (a - 1.0)
+        D = (1.0 - H) * (W.T @ R0) + (b - 1.0)
+        H = _safe_div(C, C + D)
+        return np.clip(H, 1e-9, 1.0 - 1e-9)
+
+    def _update_beta_W_mm(self, W, H, R1, R0):
+        # W <- ( W ⊙ (R1 H^T) + (α-1) ) / ( ... + (1-W) ⊙ (R0 (1-H)^T) + (β-1) )
+        a, b = float(self.alpha), float(self.beta)
+        C = W * (R1 @ H.T) + (a - 1.0)
+        D = (1.0 - W) * (R0 @ (1.0 - H).T) + (b - 1.0)
+        W = _safe_div(C, C + D)
+        return np.clip(W, 1e-9, 1.0 - 1e-9)
+
+    def _update_simplex_W_mm(self, W, H, R1, R0, M_size, N_size):
+        # Paper (Alg.1): W <- W ⊙ (R1 H^T + R0 (1-H)^T) / N
+        # We divide by N explicitly; in masked setups we additionally renormalize rows.
+        mult = (R1 @ H.T) + (R0 @ (1.0 - H).T)
+        W = W * _safe_div(mult, N_size)
+        return _normalize_rows_simplex(W)
+
+    def _update_simplex_H_mm(self, H, W, R1, R0, M_size, N_size):
+        # Symmetric of Alg.1 for col-simplex H: H <- H ⊙ (W^T R1 + (1-W)^T R0) / M
+        mult = (W.T @ R1) + ((1.0 - W).T @ R0)
+        H = H * _safe_div(mult, M_size)
+        return _normalize_cols_simplex(H)
+
+    # ---- public API -----------------------------------------------------------
 
     def fit(self, X, y=None, *, mask=None):
         """
@@ -394,24 +387,26 @@ class BernoulliNMF_MM(BaseEstimator, TransformerMixin):
                 R1, R0 = self._stats(X, V, mask)
 
                 if self.orientation == "beta-dir":
-                    # Update H (Beta prior), then W (row-simplex)
-                    C = W.T @ R1
-                    D = W.T @ R0
-                    H = self._update_beta_factor(C, D)
+                    # H: Beta prior (Alg.1 Eqs. 14–16)
+                    H = self._update_beta_H_mm(H, W, R1, R0)
 
-                    num = R1 @ H.T
-                    den = R0 @ H.T
-                    W = self._update_simplex_rows(W, num, den)
+                    # W: row-simplex
+                    if self.projection_method == "normalize":
+                        W = self._update_simplex_W_mm(W, H, R1, R0, M, N)
+                    else:  # "duchi" fast path
+                        W = W * ((R1 @ H.T) + (R0 @ (1.0 - H).T))
+                        W = self._proj_rows(W)
 
                 else:  # "dir-beta"
-                    # Update W (Beta prior), then H (col-simplex)
-                    C = R1 @ H.T
-                    D = R0 @ H.T
-                    W = self._update_beta_factor(C, D)
+                    # W: Beta prior (symmetric)
+                    W = self._update_beta_W_mm(W, H, R1, R0)
 
-                    num = W.T @ R1
-                    den = W.T @ R0
-                    H = self._update_simplex_cols(H, num, den)
+                    # H: col-simplex
+                    if self.projection_method == "normalize":
+                        H = self._update_simplex_H_mm(H, W, R1, R0, M, N)
+                    else:
+                        H = H * ((W.T @ R1) + ((1.0 - W).T @ R0))
+                        H = self._proj_cols(H)
 
                 V = _clip01(W @ H, eps)
                 nll = _bern_nll_masked(X, V, mask=mask, eps=eps)
@@ -419,7 +414,7 @@ class BernoulliNMF_MM(BaseEstimator, TransformerMixin):
                 obj_hist.append(obj)
 
                 if self.verbose and (it % 50 == 0 or it == self.max_iter - 1):
-                    print(f"[run {run+1}] iter {it:5d}  MAP={obj:.6f}  (NLL={nll:.6f})")
+                    print(f"[run {run+1}] iter {it:5d}  MAP={obj:.6f}")
 
                 if prev < np.inf:
                     rel = abs(prev - obj) / (prev + 1e-12)
@@ -435,14 +430,11 @@ class BernoulliNMF_MM(BaseEstimator, TransformerMixin):
         return self
 
     def fit_transform(self, X, y=None, *, mask=None):
-        """Fit the model and return W."""
         self.fit(X, mask=mask)
         return self.W_
 
     def transform(self, X, *, mask=None, max_iter: int = 500, tol: float = 1e-6):
-        """
-        Estimate W for new X with components_ fixed.
-        """
+        """Estimate W for new X with components_ fixed."""
         if not hasattr(self, "components_"):
             raise AttributeError("Model is not fitted yet.")
         eps = 1e-9
@@ -459,7 +451,7 @@ class BernoulliNMF_MM(BaseEstimator, TransformerMixin):
         rng = check_random_state(self.random_state) if _HAS_SKLEARN else np.random.default_rng(self.random_state)
         if self.orientation == "beta-dir":
             W = rng.random((M, K)).astype(self.dtype, copy=False)
-            W = self._proj_rows(W)
+            W = _normalize_rows_simplex(W)
         else:
             W = _rand_beta((M, K), self.alpha, self.beta, rng, eps).astype(self.dtype, copy=False)
 
@@ -469,13 +461,13 @@ class BernoulliNMF_MM(BaseEstimator, TransformerMixin):
             R1, R0 = self._stats(X, V, mask)
 
             if self.orientation == "beta-dir":
-                num = R1 @ H.T
-                den = R0 @ H.T
-                W = self._update_simplex_rows(W, num, den)
+                if self.projection_method == "normalize":
+                    W = self._update_simplex_W_mm(W, H, R1, R0, M, N)
+                else:
+                    W = W * ((R1 @ H.T) + (R0 @ (1.0 - H).T))
+                    W = self._proj_rows(W)
             else:
-                C = R1 @ H.T
-                D = R0 @ H.T
-                W = self._update_beta_factor(C, D)
+                W = self._update_beta_W_mm(W, H, R1, R0)
 
             V = _clip01(W @ H, eps)
             nll = _bern_nll_masked(X, V, mask=mask, eps=eps)
@@ -488,7 +480,6 @@ class BernoulliNMF_MM(BaseEstimator, TransformerMixin):
         return W
 
     def inverse_transform(self, W):
-        """Return reconstructed probabilities Xhat = W @ H in (0,1)."""
         eps = 1e-9
         H = self.components_
         V = W @ H
