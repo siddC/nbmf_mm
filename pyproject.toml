@@ -1,40 +1,68 @@
-# pixi.toml — dev environment & tasks for NBMF-MM
-# Usage:
-#   pixi install
-#   pixi run test
-#   pixi run lint
-#   pixi run build
-#   pixi run publish   # requires PYPI_TOKEN
+[build-system]
+requires = ["setuptools>=68", "setuptools_scm[toml]>=8", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [project]
-name = "nbmf-mm-dev"
-version = "0.0.0"
-description = "Dev environment for NBMF-MM"
-channels = ["conda-forge"]
-platforms = ["linux-64", "osx-64", "osx-arm64", "win-64"]
+name = "nbmf-mm"
+# Version is derived from your git tags by setuptools_scm:
+dynamic = ["version"]
+description = "Mean-parameterized Bernoulli (binary) matrix factorization via MM (NBMF‑MM), scikit‑learn‑style estimator."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+dependencies = [
+  "numpy>=1.20",
+]
 
-[dependencies]
-python = ">=3.9,<3.13"
-numpy = "*"
-scipy = "*"
+keywords = ["NMF", "binary", "Bernoulli", "matrix factorization", "MM", "probabilistic", "unsupervised", "scikit-learn"]
 
-[pypi-dependencies]
-# Your package (editable install during development)
-nbmf-mm = { path = ".", editable = true }
-# Optional/runtime + dev tools
-scikit-learn = "*"
-numexpr = "*"
-numba = "*"
-pytest = "*"
-pytest-cov = "*"
-ruff = "*"
-mypy = "*"
-uv = "*"
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Information Analysis",
+  "Typing :: Typed",
+]
 
-[tasks]
-test = "pytest -q"
-lint = "ruff check ."
-fmt = "ruff format ."
-types = "mypy --ignore-missing-imports src/nbmf_mm"
-build = "uv build"
-publish = "uv publish"
+[project.urls]
+Homepage = "https://github.com/siddC/nbmf_mm"
+Issues   = "https://github.com/siddC/nbmf_mm/issues"
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "pytest-cov",
+  "ruff",
+  "mypy",
+  "numexpr",
+  "numba",
+  "scikit-learn",
+]
+docs = [
+  "sphinx",
+  "furo",
+  "myst-parser",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["nbmf_mm*"]
+
+[tool.setuptools.package-data]
+"nbmf_mm" = ["py.typed"]
+
+[tool.setuptools_scm]
+# Write the resolved version for fast runtime `__version__`
+write_to = "src/nbmf_mm/_version.py"
+# Optional safety if git metadata isn't present (e.g., shallow tarball)
+fallback_version = "0.0.0"
