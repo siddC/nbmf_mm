@@ -10,28 +10,35 @@ name = "nbmf-mm-dev"
 version = "0.0.0"
 description = "Dev environment for NBMF-MM"
 channels = ["conda-forge"]
-# Keep it simple for CI; expand later if you want multi-platform locking
+# Keep CI simple (you can add more platforms later):
 platforms = ["linux-64"]
 
 [dependencies]
+# Let Pixi pick the current default (will be Python 3.12 on CI images).
+# That's fine now that we aren't pulling numba from PyPI here.
 python = ">=3.9,<3.13"
-pip = "*"        # ensure pip is present in the pixi/conda env
+pip = "*"
 numpy = "*"
 scipy = "*"
 
 [pypi-dependencies]
-# Dev/test tools (pypi-managed by pixi)
+# Core dev/test tools (managed via PyPI by Pixi)
 pytest = "*"
 pytest-cov = "*"
 ruff = "*"
 mypy = "*"
 numexpr = "*"
-numba = "*"
 scikit-learn = "*"
 uv = "*"
 
+# NOTE:
+# We intentionally do NOT install 'numba' in the Pixi env.
+# The PyPI solver + Python 3.12 + conda numpy>=2 can push uv/pixi to an old numba/llvmlite
+# sdist that hard-fails on Python>=3.10. Your test suite does not require numba
+# (use_numba=False), so we keep Pixi clean. The uv-based job still exercises the dev extra.
+
 [tasks]
-# Install your package in editable mode inside the pixi env
+# Install your package in editable mode inside the Pixi env
 install = "python -m pip install -e ."
 
 # Run test suite
@@ -44,8 +51,14 @@ fmt = "ruff format ."
 # Type check
 types = "mypy --ignore-missing-imports src/nbmf_mm"
 
-# Build sdist+wheel using uv inside the pixi env
+# Build sdist+wheel using uv inside the Pixi env
 build = "uv build"
 
 # Publish (requires PYPI_TOKEN in env)
 publish = "uv publish"
+
+# Optional: try numba locally only when you really want it.
+# Uncomment to experiment on local machines known to support a compatible stack:
+# install-numba = "python -m pip install numba && python - <<'PY'
+# import numba, numpy; print('Numba', numba.__version__, 'NumPy', numpy.__version__)
+# PY"
