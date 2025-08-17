@@ -3,6 +3,8 @@
 [![PyPI](https://img.shields.io/pypi/v/nbmf-mm.svg)](https://pypi.org/project/nbmf-mm/)
 [![License](https://img.shields.io/pypi/l/nbmf-mm.svg)](./LICENSE.md)
 [![Python](https://img.shields.io/pypi/pyversions/nbmf-mm.svg)](https://pypi.org/project/nbmf-mm/)
+[![CI](https://github.com/siddC/nbmf_mm/actions/workflows/ci.yml/badge.svg)](https://github.com/siddC/nbmf_mm/actions/workflows/ci.yml)
+
 
 **NBMF‑MM** is a fast, scikit‑learn‑style implementation of **mean‑parameterized Bernoulli (binary) matrix factorization** using a **Majorization–Minimization (MM)** solver.
 
