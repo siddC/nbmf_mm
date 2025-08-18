@@ -2,29 +2,26 @@
 # -*- coding: utf-8 -*-
 """
 Reproduce Magron & Févotte (2022) experiments using our nbmf-mm implementation,
-*with the exact same train/val/test splits* stored under data/magron2022/.
+with the EXACT same train/val/test splits stored under data/magron2022/.
 
 - Loads animals/paleo/lastfm from data/*.rda (as in the 2022 repo).
 - Loads splits from data/magron2022/<dataset>_split.npz (no new splits are created).
 - Runs NBMF-MM grid search over (K, alpha, beta) using our class (orientation='dir-beta').
 - Saves outputs under outputs/chauhan2025/<dataset>/:
     - nbmf-mm_val.npz          (validation cube)
-    - nbmf-mm_model.npz        (best model on validation; contains W, H, Y_hat, hyper_params, time, iters)
-    - nbmf-mm_test_init.npz    (test perplexities over multiple random inits at best hyper-params)
+    - nbmf-mm_model.npz        (best model on validation)
+    - nbmf-mm_test_init.npz    (test perplexities over many random inits)
 
-This script mirrors the flow of the original NMF-binary/main_script.py, but replaces its solver
-with nbmf_mm.NBMF. (Original script cited.)  :contentReference[oaicite:2]{index=2}
-Paper & original code:  :contentReference[oaicite:3]{index=3}
+Flow mirrors the original NMF-binary/main_script.py (MM branch).  (Original script cited.)  # 
+Paper & original code:  # :contentReference[oaicite:4]{index=4}
 """
 from __future__ import annotations
 
-import os
+import sys
 import time
 from pathlib import Path
 import numpy as np
 import pyreadr
-
-from nbmf_mm import NBMF  # our implementation
 
 
 # ---------------------------
@@ -32,20 +29,28 @@ from nbmf_mm import NBMF  # our implementation
 # ---------------------------
 def find_repo_root(start: Path | None = None) -> Path:
     """
-    Resolve the repository root so this script can live in nbmf_mm/examples/.
-    We look upwards for a directory containing 'data' and 'outputs'.
+    Resolve the repository root so this script can live in top-level examples/.
+    We walk upwards for a directory containing 'data' and 'outputs'.
     """
     here = Path(__file__).resolve() if start is None else Path(start).resolve()
     for p in [here, *here.parents]:
         if (p / "data").exists() and (p / "outputs").exists():
             return p
-    # Fallback: two levels up from examples/ -> repo root
-    return here.parents[2]
+    # Fallback: one level up from examples/ -> repo root
+    return here.parent
 
 
 REPO_ROOT = find_repo_root()
+# Make sure we can import nbmf_mm whether it's installed or in a src/ layout
+for add in (REPO_ROOT, REPO_ROOT / "src"):
+    if str(add) not in sys.path:
+        sys.path.insert(0, str(add))
+
+from nbmf_mm import NBMF  # noqa: E402  (import after path fix)
+
+
 DATA_DIR = REPO_ROOT / "data"
-SPLIT_DIR = DATA_DIR / "magron2022"         # <-- use 2022 splits, do NOT write data/chauhan2025
+SPLIT_DIR = DATA_DIR / "magron2022"   # <-- use 2022 splits, never write data/chauhan2025
 OUT_ROOT = REPO_ROOT / "outputs" / "chauhan2025"
 
 
@@ -127,7 +132,7 @@ def training_with_validation(
 ):
     """
     Grid over K x alpha x beta; save best model (by val perplexity) and the full validation cube.
-    Mirrors the structure of the original main_script's NBMF-MM branch.  :contentReference[oaicite:4]{index=4}
+    Mirrors the structure of main_script.py (MM branch).  # 
     """
     nk, na, nb = len(list_nfactors), len(list_alpha), len(list_beta)
     val_pplx = np.zeros((nk, na, nb))
@@ -182,7 +187,7 @@ def train_test_init(
 ):
     """
     Fix hyper-params and evaluate test-time perplexity over many random restarts,
-    as in the 2022 workflow.  :contentReference[oaicite:5]{index=5}
+    as in the 2022 workflow.  # 
     """
     K, a, b = int(hyper_params[0]), float(hyper_params[1]), float(hyper_params[2])
     test_pplx = np.zeros((n_init,), dtype=float)
@@ -231,7 +236,7 @@ if __name__ == "__main__":
         split_file = SPLIT_DIR / f"{ds}_split.npz"
         if not split_file.exists():
             raise FileNotFoundError(
-                f"Expected split at {split_file}. Please run the original 2022 pipeline or copy the file."
+                f"Expected split at {split_file}. Please copy the 2022 split files here."
             )
         with np.load(split_file) as sp:
             train_mask = sp["train_mask"].astype(float)
@@ -255,4 +260,4 @@ if __name__ == "__main__":
             max_iter=max_iter, tol=tol, n_init=n_init, base_seed=12345
         )
 
-    print("\nAll done. Outputs are under outputs/chauhan2025 and figures will be created by display_reproduced_results.py.")
+    print("\nAll done. Outputs are under outputs/chauhan2025 and figures will be created by examples/display_reproduced_results.py.")

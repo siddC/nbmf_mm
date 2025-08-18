@@ -7,12 +7,12 @@ Figure 1  : Validation heatmaps for our NBMF-MM (one panel per dataset).
 Figure 2  : Test-set perplexity comparison: magron2022 (original) vs chauhan2025 (our reproduction).
 Figure 3  : H comparison on lastfm — left: magron2022 NBMF-MM, right: our nbmf-mm.
 
-This mirrors the visual structure of the original display_results.py but swaps in the
-requested comparisons. (Original script cited.)  :contentReference[oaicite:6]{index=6}
-Paper & original code:  :contentReference[oaicite:7]{index=7}
+Mirrors the structure of the original display_results.py with the requested comparisons.  # 
+Paper & original code:  # :contentReference[oaicite:8]{index=8}
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 import numpy as np
 import pyreadr
@@ -34,10 +34,14 @@ def find_repo_root(start: Path | None = None) -> Path:
     for p in [here, *here.parents]:
         if (p / "data").exists() and (p / "outputs").exists():
             return p
-    return here.parents[2]
+    return here.parent
 
 
 REPO_ROOT = find_repo_root()
+for add in (REPO_ROOT, REPO_ROOT / "src"):
+    if str(add) not in sys.path:
+        sys.path.insert(0, str(add))
+
 DATA_DIR = REPO_ROOT / "data"
 OUT_MG = REPO_ROOT / "outputs" / "magron2022"
 OUT_CH = REPO_ROOT / "outputs" / "chauhan2025"
@@ -57,7 +61,7 @@ for j, ds in enumerate(datasets, start=1):
     val_pplx = val_loader["val_pplx"]
     list_nfactors, list_alpha, list_beta = val_loader["list_hyper"]
 
-    ind_k_opt, ind_alpha_opt, ind_beta_opt = np.unravel_index(val_pplx.argmin(), val_pplx.shape)
+    ind_k_opt, _, _ = np.unravel_index(val_pplx.argmin(), val_pplx.shape)
 
     ax = plt.subplot(1, n_datasets, j)
     im = ax.imshow(val_pplx[ind_k_opt, :, :], aspect="auto", cmap="gray")
@@ -155,13 +159,13 @@ data_lastfm = pyreadr.read_r(DATA_DIR / f"{dataset}.rda")[dataset]
 H_mg = np.load(OUT_MG / dataset / "NBMF-MM_model.npz", allow_pickle=True)["H"]
 H_ch = np.load(OUT_CH / dataset / "nbmf-mm_model.npz", allow_pickle=True)["H"]
 
-# Optional swap for visualization parity, as in the original script.  :contentReference[oaicite:8]{index=8}
+# Optional swap for visualization parity (as in the original script).  # 
 if H_mg.shape[1] >= 4:
     H_mg[:, [2, 3]] = H_mg[:, [3, 2]]
 if H_ch.shape[1] >= 4:
     H_ch[:, [2, 3]] = H_ch[:, [3, 2]]
 
-# Curated subset & ordering (as in the original display script).  :contentReference[oaicite:9]{index=9}
+# Curated subset & ordering (as in the original display script).  # 
 plot_range = np.concatenate((np.arange(120, 130), np.arange(184, 199)), axis=0)
 plot_range = plot_range[[4, 5, 1, 0, 3, 14, 15, 2, 6, 7, 8, 9, 11, 12, 17, 18, 19, 10, 13, 16, 20, 21, 22, 23, 24]]
 
