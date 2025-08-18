@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-import json
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -89,13 +88,12 @@ def plot_test_boxplots(outdir: Path, root: Path, datasets=("animals", "paleo", "
     for ax, ds in zip(axs, datasets):
         ds_dir = root / ds
         tbl = _load_test_csv(ds_dir)
-        labels = []
-        data = []
+        labels, data = [], []
         for method in ("NBMF-EM", "NBMF-MM", "logPCA"):
             if method in tbl:
                 labels.append(method)
                 data.append(tbl[method])
-        bp = ax.boxplot(data, labels=labels, showmeans=False)
+        ax.boxplot(data, labels=labels, showmeans=False)
         ax.set_title(ds)
         ax.set_ylabel("Test perplexity")
     fig.suptitle("Test perplexity (10 random initializations)", y=1.02, fontsize=12)
