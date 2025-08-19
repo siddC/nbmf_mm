@@ -2,7 +2,16 @@
 
 [![CI](https://github.com/siddC/nbmf_mm/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/siddC/nbmf_mm/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE.md)
-![Python versions](https://img.shields.io/badge/python-3.9–3.12-blue)
+[![Python versions](https://img.shields.io/badge/python-3.9–3.12-blue.svg)](https://www.python.org/downloads/)
+[![PyPI version](https://img.shields.io/badge/pypi-0.1.0-blue.svg)](https://pypi.org/project/nbmf-mm/)
+[![Conda version](https://img.shields.io/badge/conda-0.1.0-green.svg)](https://anaconda.org/conda-forge/nbmf-mm)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Imports: isort](https://img.shields.io/badge/%20imports-isort-%231674b1?style=flat&labelColor=ef8336)](https://pycqa.github.io/isort/)
+[![Type checked with mypy](https://img.shields.io/badge/mypy-checked-blue.svg)](http://mypy-lang.org/)
+[![Documentation](https://img.shields.io/badge/docs-mkdocs-blue.svg)](https://nbmf-mm.readthedocs.io/)
+[![DOI](https://img.shields.io/badge/DOI-10.1109%2FLSP.2022.3185610-blue.svg)](https://doi.org/10.1109/LSP.2022.3185610)
+[![arXiv](https://img.shields.io/badge/arXiv-2204.09741-b31b1b.svg)](https://arxiv.org/abs/2204.09741)
+[![JOSS](https://joss.theoj.org/papers/10.21105/joss.00000/status.svg)](https://joss.theoj.org/papers/10.21105/joss.00000)
 
 **NBMF‑MM** is a fast, scikit‑learn‑style implementation of **mean‑parameterized Bernoulli (binary) matrix factorization** using a **Majorization–Minimization (MM)** solver.
 
