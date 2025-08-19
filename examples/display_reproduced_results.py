@@ -1,47 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Generate figures for NBMF-MM reproduction experiments.
+Figures for apples-to-apples NBMF-MM reproduction.
 
-This script creates publication-quality figures comparing our NBMF-MM implementation
-with the original Magron & Févotte (2022) results. It generates three main figures:
+Figure 1: Validation α–β heatmaps at the best K (our solver).
+Figure 2: Test-set cross-entropy (mean NLL) boxplots — magron2022 vs chauhan2025.
+Figure 3: LastFM H comparison — align our components to magron2022 (Hungarian),
+          then plot the same curated band subset as in the 2022 display script.
 
-Figure 1: Validation heatmaps
-    Shows cross-entropy scores across hyperparameter grids (α, β) for each dataset.
-    Each panel corresponds to the optimal rank K found during validation.
-
-Figure 2: Test performance comparison
-    Boxplots comparing test cross-entropy between original (magron2022) and our
-    reproduction (chauhan2025) across multiple random initializations.
-
-Figure 3: Component analysis (LastFM)
-    Heatmap comparison of learned components H between original and reproduction
-    for the LastFM dataset, showing qualitative agreement.
-
-Inputs
-------
-- outputs/chauhan2025/: Results from our reproduction experiments
-- outputs/magron2022/: Original results from Magron & Févotte (2022)
-
-Outputs
--------
-- outputs/chauhan2025/figures/: Generated figures in PNG format
-
-References
-----------
-.. [1] P. Magron & C. Févotte (2022). A majorization-minimization algorithm for
-       nonnegative binary matrix factorization. IEEE Signal Processing Letters.
-       https://doi.org/10.1109/LSP.2022.3185610
+Paper & original code:
+  - https://arxiv.org/abs/2204.09741
+  - https://github.com/magronp/NMF-binary
 """
 from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Optional
 import numpy as np
+import pyreadr
 import matplotlib
-
-# Prefer interactive backend if available; otherwise fall back to Agg
 try:
     matplotlib.use("TkAgg")
 except Exception:
@@ -49,37 +26,17 @@ except Exception:
 import matplotlib.pyplot as plt
 
 
-def find_repo_root(start: Optional[Path] = None) -> Path:
-    """
-    Find the repository root directory.
-    
-    Walks up the directory tree looking for a directory containing both
-    'data' and 'outputs' folders.
-    
-    Parameters
-    ----------
-    start : Path, optional
-        Starting directory for the search. If None, uses the directory
-        containing this script.
-        
-    Returns
-    -------
-    Path
-        Path to the repository root directory.
-        
-    Raises
-    ------
-    FileNotFoundError
-        If repository root cannot be found.
-    """
+# ---------------------------
+# Paths
+# ---------------------------
+def find_repo_root(start: Path | None = None) -> Path:
     here = Path(__file__).resolve() if start is None else Path(start).resolve()
     for p in [here, *here.parents]:
         if (p / "data").exists() and (p / "outputs").exists():
             return p
-    raise FileNotFoundError("Could not find repository root (no directory with 'data' and 'outputs')")
+    raise FileNotFoundError("Could not find repository root (no 'data' and 'outputs').")
 
 
-# Setup paths
 REPO_ROOT = find_repo_root()
 for add in (REPO_ROOT, REPO_ROOT / "src"):
     if str(add) not in sys.path:
@@ -91,233 +48,146 @@ OUT_CH = REPO_ROOT / "outputs" / "chauhan2025"
 FIG_DIR = OUT_CH / "figures"
 FIG_DIR.mkdir(parents=True, exist_ok=True)
 
-# Dataset configuration
 datasets = ["animals", "paleo", "lastfm"]
-n_datasets = len(datasets)
 
 
-def create_validation_heatmaps():
-    """
-    Create Figure 1: Validation cross-entropy heatmaps.
-    
-    Shows α-β heatmaps for the optimal rank K for each dataset.
-    """
-    print("Creating Figure 1: Validation heatmaps...")
-    
-    fig, axes = plt.subplots(1, n_datasets, figsize=(4 * n_datasets, 3.6))
-    if n_datasets == 1:
-        axes = [axes]
-    
-    for j, dataset in enumerate(datasets):
-        # Load validation results
-        val_file = OUT_CH / dataset / "nbmf-mm_val.npz"
-        if not val_file.exists():
-            print(f"Warning: {val_file} not found, skipping {dataset}")
-            continue
-            
-        val_data = np.load(val_file, allow_pickle=True)
-        val_pplx = val_data["val_pplx"]  # Cross-entropy values
-        list_hyper = val_data["list_hyper"]
-        list_nfactors, list_alpha, list_beta = list_hyper
-        
-        # Find optimal K (minimum cross-entropy across all hyperparameters)
-        ind_k_opt, _, _ = np.unravel_index(val_pplx.argmin(), val_pplx.shape)
-        
-        # Create heatmap
-        ax = axes[j]
-        im = ax.imshow(val_pplx[ind_k_opt, :, :], aspect="auto", cmap="gray")
-        ax.invert_yaxis()
-        
-        # Set tick labels
-        xpositions = np.arange(len(list_beta))[::2]
-        ax.set_xticks(xpositions)
-        ax.set_xticklabels([f"{float(b):.1f}" for b in list_beta][::2])
-        ax.set_xlabel(r"$\beta$", fontsize=14)
-        
-        if j == 0:
-            ypositions = np.arange(len(list_alpha))[::2]
-            ax.set_yticks(ypositions)
-            ax.set_yticklabels([f"{float(a):.1f}" for a in list_alpha][::2])
-            ax.set_ylabel(r"$\alpha$", fontsize=14)
-        else:
-            ax.set_yticks([])
-        
-        ax.set_title(f"{dataset} (K={list_nfactors[ind_k_opt]})", fontsize=14)
-    
-    plt.tight_layout()
-    plt.savefig(FIG_DIR / "figure1_val_heatmaps.png", dpi=150, bbox_inches="tight")
+# ---------------------------
+# Figure 1 — validation heatmaps
+# ---------------------------
+plt.figure(figsize=(4 * len(datasets), 3.6))
+for j, ds in enumerate(datasets, start=1):
+    val_loader = np.load(OUT_CH / ds / "nbmf-mm_val.npz", allow_pickle=True)
+    val_pplx = val_loader["val_pplx"]              # this is mean NLL (cross-entropy)
+    list_nfactors, list_alpha, list_beta = val_loader["list_hyper"]
+
+    ind_k_opt, _, _ = np.unravel_index(val_pplx.argmin(), val_pplx.shape)
+
+    ax = plt.subplot(1, len(datasets), j)
+    im = ax.imshow(val_pplx[ind_k_opt, :, :], aspect="auto", cmap="gray")
+    ax.invert_yaxis()
+
+    xpositions = np.arange(len(list_beta))[::2]
+    ax.set_xticks(xpositions)
+    ax.set_xticklabels([f"{float(b):.1f}" for b in list_beta][::2])
+    ax.set_xlabel(r"$\beta$", fontsize=14)
+
+    if j == 1:
+        ypositions = np.arange(len(list_alpha))[::2]
+        ax.set_yticks(ypositions)
+        ax.set_yticklabels([f"{float(a):.1f}" for a in list_alpha][::2])
+        ax.set_ylabel(r"$\alpha$", fontsize=14)
+    else:
+        ax.set_yticks([])
+
+    ax.set_title(f"{ds} (K={list_nfactors[ind_k_opt]})", fontsize=14)
+
+plt.tight_layout()
+plt.savefig(FIG_DIR / "figure1_val_heatmaps.png", dpi=150, bbox_inches="tight")
+try: plt.show()
+except Exception: pass
+plt.close()
+
+
+# ---------------------------
+# Figure 2 — test-set comparison (magron2022 vs chauhan2025)
+# ---------------------------
+n_init = 10
+test_pplx_all = np.full((n_init, 2, len(datasets)), np.nan)
+test_time_all = np.full((n_init, 2, len(datasets)), np.nan)
+test_iter_all = np.full((n_init, 2, len(datasets)), np.nan)
+
+for d, ds in enumerate(datasets):
+    mg = np.load(OUT_MG / ds / "NBMF-MM_test_init.npz", allow_pickle=True)
+    ch = np.load(OUT_CH / ds / "nbmf-mm_test_init.npz", allow_pickle=True)
+
+    test_pplx_all[:, 0, d] = mg["test_pplx"]       # 2022: called “perplexity” but it’s mean NLL
+    test_time_all[:, 0, d] = mg["test_time"]
+    test_iter_all[:, 0, d] = mg["test_iter"]
+
+    test_pplx_all[:, 1, d] = ch["test_pplx"]
+    test_time_all[:, 1, d] = ch["test_time"]
+    test_iter_all[:, 1, d] = ch["test_iter"]
+
+plt.figure(figsize=(4 * len(datasets), 3.6))
+xpos = [1, 2]; labels = ["magron2022", "chauhan2025"]
+for d, ds in enumerate(datasets, start=1):
+    ax = plt.subplot(1, len(datasets), d)
+    ax.boxplot([test_pplx_all[:, 0, d-1], test_pplx_all[:, 1, d-1]],
+               showfliers=False, positions=xpos, widths=[0.75, 0.75])
+    ax.set_xticks(xpos); ax.set_xticklabels(labels, rotation=25, fontsize=11)
+    if d == 1:
+        ax.set_ylabel("Cross-entropy (mean NLL)", fontsize=12)
+    ax.set_title(ds, fontsize=14)
+
+plt.tight_layout()
+plt.savefig(FIG_DIR / "figure2_ce_comparison.png", dpi=150, bbox_inches="tight")
+try: plt.show()
+except Exception: pass
+plt.close()
+
+
+# ---------------------------
+# Figure 3 — LastFM H comparison with component alignment
+# ---------------------------
+dataset = "lastfm"
+mg_model = np.load(OUT_MG / dataset / "NBMF-MM_model.npz", allow_pickle=True)
+ch_model = np.load(OUT_CH / dataset / "nbmf-mm_model.npz", allow_pickle=True)
+
+H_mg = mg_model["H"]   # (n_features x K)
+H_ch = ch_model["H"]
+
+# Align our columns to magron2022 using Hungarian assignment on |corr|
+def align_columns(H_ref: np.ndarray, H: np.ndarray) -> np.ndarray:
+    C = np.corrcoef(H_ref.T, H.T)[:H_ref.shape[1], H_ref.shape[1]:]
+    C = -np.abs(C)  # maximize |corr| -> minimize cost
     try:
-        plt.show()
+        from scipy.optimize import linear_sum_assignment
+        r, c = linear_sum_assignment(C)
+        return H[:, c]
     except Exception:
-        pass
-    plt.close()
+        # greedy fallback
+        k = H_ref.shape[1]
+        taken = set()
+        order = []
+        for j in range(k):
+            corrs = np.abs(np.corrcoef(H_ref[:, j], H, rowvar=False)[0, 1:])
+            corrs[list(taken)] = -np.inf
+            idx = int(np.argmax(corrs))
+            order.append(idx); taken.add(idx)
+        return H[:, order]
 
+H_ch = align_columns(H_mg, H_ch)
 
-def create_test_comparison():
-    """
-    Create Figure 2: Test performance comparison.
-    
-    Boxplots comparing cross-entropy between original and reproduction results.
-    """
-    print("Creating Figure 2: Test performance comparison...")
-    
-    models = ["magron2022", "chauhan2025"]
-    n_models = len(models)
-    n_init = 10
-    
-    # Initialize results arrays
-    test_pplx_all = np.full((n_init, n_models, n_datasets), np.nan)
-    test_time_all = np.full((n_init, n_models, n_datasets), np.nan)
-    test_iter_all = np.full((n_init, n_models, n_datasets), np.nan)
-    
-    # Load results for each dataset
-    for d, dataset in enumerate(datasets):
-        # Original results (magron2022)
-        mg_file = OUT_MG / dataset / "NBMF-MM_test_init.npz"
-        if mg_file.exists():
-            mg_data = np.load(mg_file, allow_pickle=True)
-            test_pplx_all[:, 0, d] = mg_data["test_pplx"]
-            test_time_all[:, 0, d] = mg_data["test_time"]
-            test_iter_all[:, 0, d] = mg_data["test_iter"]
-        else:
-            print(f"Warning: {mg_file} not found")
-        
-        # Our reproduction results (chauhan2025)
-        ch_file = OUT_CH / dataset / "nbmf-mm_test_init.npz"
-        if ch_file.exists():
-            ch_data = np.load(ch_file, allow_pickle=True)
-            test_pplx_all[:, 1, d] = ch_data["test_pplx"]
-            test_time_all[:, 1, d] = ch_data["test_time"]
-            test_iter_all[:, 1, d] = ch_data["test_iter"]
-        else:
-            print(f"Warning: {ch_file} not found")
-    
-    # Create boxplots
-    fig, axes = plt.subplots(1, n_datasets, figsize=(4 * n_datasets, 3.6))
-    if n_datasets == 1:
-        axes = [axes]
-    
-    xpos = [1, 2]
-    for d, dataset in enumerate(datasets):
-        ax = axes[d]
-        
-        # Filter out NaN values
-        data1 = test_pplx_all[:, 0, d]
-        data2 = test_pplx_all[:, 1, d]
-        data1 = data1[~np.isnan(data1)]
-        data2 = data2[~np.isnan(data2)]
-        
-        if len(data1) > 0 and len(data2) > 0:
-            ax.boxplot([data1, data2], positions=xpos)
-            ax.set_xticks(xpos)
-            ax.set_xticklabels(["Original", "Ours"])
-            ax.set_ylabel("Test Cross-entropy", fontsize=12)
-            ax.set_title(dataset, fontsize=14)
-            
-            # Add mean values as text
-            mean1, mean2 = np.mean(data1), np.mean(data2)
-            ax.text(0.02, 0.98, f"Original: {mean1:.4f}", 
-                   transform=ax.transAxes, verticalalignment='top',
-                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
-            ax.text(0.02, 0.90, f"Ours: {mean2:.4f}", 
-                   transform=ax.transAxes, verticalalignment='top',
-                   bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.5))
-        else:
-            ax.text(0.5, 0.5, "No data", ha='center', va='center', transform=ax.transAxes)
-            ax.set_title(f"{dataset} (no data)", fontsize=14)
-    
-    plt.tight_layout()
-    plt.savefig(FIG_DIR / "figure2_test_comparison.png", dpi=150, bbox_inches="tight")
-    try:
-        plt.show()
-    except Exception:
-        pass
-    plt.close()
+# 2022 display script swaps columns 2 and 3 for visualization
+if H_mg.shape[1] >= 4:
+    H_mg[:, [2, 3]] = H_mg[:, [3, 2]]
+if H_ch.shape[1] >= 4:
+    H_ch[:, [2, 3]] = H_ch[:, [3, 2]]
 
+# Curated subset of bands for parity with 2022 display_results.py
+plot_range = np.concatenate((np.arange(120, 130), np.arange(184, 199)), axis=0)
+plot_range = plot_range[[4, 5, 1, 0, 3, 14, 15, 2, 6, 7, 8, 9, 11, 12, 17, 18, 19, 10, 13, 16, 20, 21, 22, 23, 24]]
 
-def create_component_comparison():
-    """
-    Create Figure 3: Component comparison for LastFM dataset.
-    
-    Shows heatmaps of learned components H from both original and reproduction.
-    """
-    print("Creating Figure 3: Component comparison (LastFM)...")
-    
-    # Load best models for LastFM
-    mg_model_file = OUT_MG / "lastfm" / "NBMF-MM_model.npz"
-    ch_model_file = OUT_CH / "lastfm" / "nbmf-mm_model.npz"
-    
-    if not mg_model_file.exists() or not ch_model_file.exists():
-        print("Warning: Model files not found, skipping component comparison")
-        return
-    
-    # Load components
-    mg_data = np.load(mg_model_file, allow_pickle=True)
-    ch_data = np.load(ch_model_file, allow_pickle=True)
-    
-    H_mg = mg_data["H"]  # Original components
-    H_ch = ch_data["H"]  # Our components
-    
-    # Create comparison figure
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
-    
-    # Original components
-    im1 = ax1.imshow(H_mg, aspect='auto', cmap='viridis')
-    ax1.set_title("Original (Magron & Févotte 2022)", fontsize=14)
-    ax1.set_xlabel("Components", fontsize=12)
-    ax1.set_ylabel("Features", fontsize=12)
-    plt.colorbar(im1, ax=ax1)
-    
-    # Our components
-    im2 = ax2.imshow(H_ch, aspect='auto', cmap='viridis')
-    ax2.set_title("Our Reproduction", fontsize=14)
-    ax2.set_xlabel("Components", fontsize=12)
-    ax2.set_ylabel("Features", fontsize=12)
-    plt.colorbar(im2, ax=ax2)
-    
-    plt.tight_layout()
-    plt.savefig(FIG_DIR / "figure3_component_comparison.png", dpi=150, bbox_inches="tight")
-    try:
-        plt.show()
-    except Exception:
-        pass
-    plt.close()
+data_lastfm = pyreadr.read_r(DATA_DIR / f"{dataset}.rda")[dataset]
+labels_plot = np.array(data_lastfm.columns)[plot_range]
+H_mg_plot = H_mg[plot_range, :]
+H_ch_plot = H_ch[plot_range, :]
 
+ypos = np.arange(len(labels_plot))
+plt.figure(figsize=(10, 8))
+ax1 = plt.subplot(1, 2, 1)
+im1 = ax1.imshow(H_mg_plot, aspect="auto", cmap="binary")
+ax1.set_yticks(ypos); ax1.set_yticklabels(labels_plot, fontsize=11)
+ax1.set_xticks([]); ax1.set_title("magron2022 (NBMF-MM)", fontsize=14)
 
-def main():
-    """Generate all figures for the reproduction experiment."""
-    print("NBMF-MM Figure Generation")
-    print("=" * 30)
-    
-    # Set matplotlib style for publication-quality figures
-    plt.style.use('default')
-    plt.rcParams.update({
-        'font.size': 10,
-        'axes.titlesize': 12,
-        'axes.labelsize': 10,
-        'xtick.labelsize': 9,
-        'ytick.labelsize': 9,
-        'legend.fontsize': 9,
-        'figure.titlesize': 14,
-    })
-    
-    # Generate figures
-    create_validation_heatmaps()
-    create_test_comparison()
-    create_component_comparison()
-    
-    print(f"\nFigures saved to: {FIG_DIR}")
-    print("\nGenerated figures:")
-    print("1. figure1_val_heatmaps.png - Validation cross-entropy heatmaps")
-    print("2. figure2_test_comparison.png - Test performance comparison")
-    print("3. figure3_component_comparison.png - Component analysis (LastFM)")
-    
-    # Compare with original figures if available
-    original_fig_dir = OUT_MG / "figures"
-    if original_fig_dir.exists():
-        print(f"\nOriginal figures available at: {original_fig_dir}")
-        print("Compare the generated figures with the original ones for validation.")
+ax2 = plt.subplot(1, 2, 2)
+im2 = ax2.imshow(H_ch_plot, aspect="auto", cmap="binary")
+ax2.set_yticks([]); ax2.set_xticks([]); ax2.set_title("chauhan2025 (nbmf-mm)", fontsize=14)
 
+plt.tight_layout()
+plt.savefig(FIG_DIR / "figure3_lastfm_H_compare.png", dpi=150, bbox_inches="tight")
+try: plt.show()
+except Exception: pass
+plt.close()
 
-if __name__ == "__main__":
-    main()
+print(f"\nFigures saved under: {FIG_DIR.resolve()}")
