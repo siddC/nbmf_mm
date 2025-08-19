@@ -1,224 +1,249 @@
-# reproduce_magron2022.py
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""
+Reproduce Magron & Févotte (2022) NBMF-MM experiments using our nbmf-mm solver,
+STRICTLY matching the original protocol and splits.
 
-import os
+- Loads animals/paleo/lastfm from data/*.rda
+- Loads *fixed* magron2022 splits from data/magron2022/<dataset>_split.npz
+- Grid-search: K in {2,4,8,16}, alpha,beta in linspace(1.0,3.0,11)  (paper/2022 repo)
+- Orientation: Beta prior on H, simplex (Dirichlet) on W  -> orientation='beta-dir'
+- Metric: Bernoulli mean negative log-likelihood (cross-entropy), identical to 2022
+- Outputs under outputs/chauhan2025/<dataset>/ with 2022-compatible keys
+
+Paper & original code:
+  - https://arxiv.org/abs/2204.09741  (Magron & Févotte, 2022)  # apples-to-apples target
+  - https://github.com/magronp/NMF-binary                     # original scripts
+"""
+from __future__ import annotations
+
+import sys
 import time
 from pathlib import Path
+from typing import Tuple, Optional
 import numpy as np
 import pyreadr
 
-# Our implementation
-from nbmf_mm import NBMF  # API documented in the repo README. :contentReference[oaicite:5]{index=5}
+
+# ---------------------------
+# Paths & imports
+# ---------------------------
+def find_repo_root(start: Optional[Path] = None) -> Path:
+    here = Path(__file__).resolve() if start is None else Path(start).resolve()
+    for p in [here, *here.parents]:
+        if (p / "data").exists() and (p / "outputs").exists():
+            return p
+    raise FileNotFoundError("Could not find repository root (no 'data' and 'outputs').")
+
+
+REPO_ROOT = find_repo_root()
+for add in (REPO_ROOT, REPO_ROOT / "src"):
+    if str(add) not in sys.path:
+        sys.path.insert(0, str(add))
+
+from nbmf_mm import NBMF  # noqa: E402
+
+DATA_DIR = REPO_ROOT / "data"
+SPLIT_DIR = DATA_DIR / "magron2022"          # use the *original* splits
+OUT_ROOT = REPO_ROOT / "outputs" / "chauhan2025"
+
+
+def ensure_dir(path: str | Path) -> None:
+    Path(path).mkdir(parents=True, exist_ok=True)
 
 
 # ---------------------------
-# Utilities
+# Metrics & fitting
 # ---------------------------
-
-def ensure_dir(p: str | Path) -> None:
-    Path(p).mkdir(parents=True, exist_ok=True)
-
-
-def build_split_masks(shape, prop_train=0.70, prop_val=0.15, seed=12345):
-    """
-    Create disjoint train/val/test masks with given proportions over entries.
-    Returns float masks in {0,1} with sum = 1 everywhere.
-    """
-    m, n = shape
-    rng = np.random.default_rng(seed)
-    u = rng.random((m, n))
-    train_mask = (u < prop_train).astype(float)
-    val_mask = ((u >= prop_train) & (u < prop_train + prop_val)).astype(float)
-    test_mask = (1.0 - train_mask - val_mask).astype(float)
-    return train_mask, val_mask, test_mask
-
-
-def bernoulli_perplexity(X, P, mask=None, eps=1e-9) -> float:
-    """
-    Perplexity = exp( NLL / (# observed) ), Bernoulli mean-parametrized.
-    X: binary {0,1}, P: probabilities in (0,1), mask in [0,1].
-    """
+def bernoulli_cross_entropy(
+    X: np.ndarray,
+    P: np.ndarray,
+    mask: Optional[np.ndarray] = None,
+    eps: float = 1e-9,
+) -> float:
+    """Mean Bernoulli negative log-likelihood over observed entries."""
     if mask is None:
         mask = np.ones_like(X, dtype=float)
     P = np.clip(P, eps, 1.0 - eps)
     nll = -(mask * (X * np.log(P) + (1 - X) * np.log(1 - P))).sum()
     denom = float(mask.sum()) if float(mask.sum()) > 0 else 1.0
-    return float(np.exp(nll / denom))
+    return float(nll / denom)
 
 
 def fit_nbmf_mm(
-    X, train_mask, n_components, alpha, beta, *,
-    orientation="dir-beta", max_iter=2000, tol=1e-8, seed=0,
-    use_numexpr=True, projection_method="duchi", projection_backend="auto"
-):
-    """
-    Fit NBMF-MM with given hyperparameters. Returns (W, H_featxcomp, Xhat, tot_time, iters).
-    H is saved as (n_features x n_components) to mirror the 2022 npz orientation.
-    """
+    X: np.ndarray,
+    train_mask: np.ndarray,
+    n_components: int,
+    alpha: float,
+    beta: float,
+    *,
+    orientation: str = "beta-dir",   # paper’s orientation: Beta on H, simplex on W
+    max_iter: int = 2000,
+    tol: float = 1e-8,
+    seed: int = 0,
+    use_numexpr: bool = True,
+    projection_method: str = "duchi",
+    projection_backend: str = "auto",
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float, int]:
+    """Fit NBMF-MM and return (W, H_featxcomp, Xhat, time, n_iter)."""
     t0 = time.perf_counter()
     model = NBMF(
         n_components=n_components,
         orientation=orientation,
-        alpha=alpha, beta=beta,
-        max_iter=max_iter, tol=tol,
+        alpha=alpha,
+        beta=beta,
+        max_iter=max_iter,
+        tol=tol,
         random_state=seed,
         use_numexpr=use_numexpr,
         projection_method=projection_method,
         projection_backend=projection_backend,
     ).fit(X, mask=train_mask)
-    tot_time = time.perf_counter() - t0
+    tot = time.perf_counter() - t0
 
-    W = model.W_  # (n_samples, n_components)
-    H_comp = model.components_            # (n_components, n_features)
-    H = H_comp.T                          # (n_features, n_components) for parity with 2022 npz
-    Xhat = model.inverse_transform(W)     # reconstructed probabilities, (n_samples, n_features)
+    W = model.W_
+    H = model.components_.T           # store as (n_features x n_components), like 2022 files
+    Xhat = model.inverse_transform(W)
 
-    iters = getattr(model, "n_iter_", None)
-    if iters is None:
+    # robust n_iter
+    n_iter = getattr(model, "n_iter_", None)
+    if n_iter is None:
         hist = getattr(model, "objective_history_", None)
-        iters = len(hist) if hist is not None else np.nan
+        n_iter = len(hist) if hist is not None else np.nan
 
-    return W, H, Xhat, tot_time, iters
-
-
-def training_with_validation(
-    X, train_mask, val_mask, list_nfactors, list_alpha, list_beta,
-    out_dir_dataset, *, max_iter=2000, tol=1e-8, base_seed=12345
-):
-    """
-    Grid over K x alpha x beta; save best model and the entire validation cube.
-    """
-    nk, na, nb = len(list_nfactors), len(list_alpha), len(list_beta)
-    val_pplx = np.zeros((nk, na, nb))
-    opt_pplx = np.inf
-    best_triplet = None
-
-    # iterate hyper-params (mirror 2022 main_script structure). :contentReference[oaicite:6]{index=6}
-    counter, total = 1, nk * na * nb
-    for ik, K in enumerate(list_nfactors):
-        for ia, a in enumerate(list_alpha):
-            for ib, b in enumerate(list_beta):
-                print(f"--- Hyperparameters {counter}/{total}: K={K}, alpha={a:.3g}, beta={b:.3g}")
-                # deterministic but distinct seeds per triple:
-                seed = (base_seed * 10_007 + 97 * K + 3 * ia + 5 * ib) % (2**32 - 1)
-
-                W, H, Xhat, tot_time, iters = fit_nbmf_mm(
-                    X, train_mask, K, a, b,
-                    max_iter=max_iter, tol=tol, seed=seed
-                )
-
-                # Perplexity on validation entries
-                perplx = bernoulli_perplexity(X, Xhat, mask=val_mask)
-                print(f"Val perplexity: {perplx:.4f}")
-                val_pplx[ik, ia, ib] = perplx
-
-                # Save best so far
-                if perplx < opt_pplx:
-                    np.savez(
-                        os.path.join(out_dir_dataset, "nbmf-mm_model.npz"),
-                        W=W, H=H, Y_hat=Xhat,
-                        hyper_params=(int(K), float(a), float(b)),
-                        time=tot_time, loss=None, iters=iters,
-                    )
-                    opt_pplx = perplx
-                    best_triplet = (K, a, b)
-
-                counter += 1
-
-    # Store the full validation grid
-    np.savez(
-        os.path.join(out_dir_dataset, "nbmf-mm_val.npz"),
-        val_pplx=np.array(val_pplx),
-        list_hyper=np.array([list_nfactors, list_alpha, list_beta], dtype=object),
-    )
-
-    return best_triplet
-
-
-def train_test_init(
-    X, train_mask, test_mask, hyper_params, out_dir_dataset,
-    *, max_iter=2000, tol=1e-8, n_init=10, base_seed=12345
-):
-    """
-    Fix hyper-params and evaluate test perplexity over many random initializations
-    (mirrors 2022 workflow and storage). :contentReference[oaicite:7]{index=7}
-    """
-    K, a, b = int(hyper_params[0]), float(hyper_params[1]), float(hyper_params[2])
-
-    test_pplx = np.zeros((n_init,), dtype=float)
-    test_time = np.zeros((n_init,), dtype=float)
-    test_iter = np.zeros((n_init,), dtype=float)
-
-    for i in range(n_init):
-        seed = (base_seed + i) % (2**32 - 1)
-        t0 = time.perf_counter()
-        W, H, Xhat, _, iters = fit_nbmf_mm(
-            X, train_mask, K, a, b, max_iter=max_iter, tol=tol, seed=seed
-        )
-        dt = time.perf_counter() - t0
-
-        test_pplx[i] = bernoulli_perplexity(X, Xhat, mask=test_mask)
-        test_time[i] = dt
-        test_iter[i] = iters if iters is not None else np.nan
-
-    np.savez(
-        os.path.join(out_dir_dataset, "nbmf-mm_test_init.npz"),
-        test_pplx=test_pplx, test_time=test_time, test_iter=test_iter
-    )
+    return W, H, Xhat, float(tot), int(n_iter) if n_iter == n_iter else np.nan  # keep np.nan for missing
 
 
 # ---------------------------
-# Main driver (datasets & loops)
+# Data I/O
+# ---------------------------
+def load_dataset(dataset_name: str):
+    """Load binary matrix X and magron2022 splits."""
+    data_file = DATA_DIR / f"{dataset_name}.rda"
+    split_file = SPLIT_DIR / f"{dataset_name}_split.npz"
+    if not data_file.exists():
+        raise FileNotFoundError(f"Missing dataset: {data_file}")
+    if not split_file.exists():
+        raise FileNotFoundError(f"Missing split file: {split_file} (from magron2022)")
+
+    X = pyreadr.read_r(str(data_file))[dataset_name].to_numpy(dtype=float)
+    splits = np.load(split_file)
+    return X, splits["train_mask"].astype(float), splits["val_mask"].astype(float), splits["test_mask"].astype(float)
+
+
+# ---------------------------
+# Training loops
+# ---------------------------
+def run_validation_grid(
+    dataset_name: str,
+    K_grid: list[int],
+    alpha_grid: list[float],
+    beta_grid: list[float],
+    *,
+    seed: int = 12345,
+):
+    """Single‑init validation grid (as in 2022 repo)."""
+    X, train_mask, val_mask, _ = load_dataset(dataset_name)
+
+    val = np.full((len(K_grid), len(alpha_grid), len(beta_grid)), np.inf)
+    best = {"score": np.inf, "K": None, "alpha": None, "beta": None}
+    best_model = {}
+
+    for i, K in enumerate(K_grid):
+        for j, a in enumerate(alpha_grid):
+            for k, b in enumerate(beta_grid):
+                print(f"  {dataset_name}: K={K}, α={a:.1f}, β={b:.1f}")
+                W, H, Xhat, tot_time, n_iter = fit_nbmf_mm(
+                    X, train_mask, K, a, b, seed=((seed * 10007) + 97*K + 3*j + 5*k) % (2**32-1)
+                )
+                ce = bernoulli_cross_entropy(X, Xhat, mask=val_mask)
+                val[i, j, k] = ce
+
+                if ce < best["score"]:
+                    best.update({"score": ce, "K": K, "alpha": a, "beta": b})
+                    best_model = {"W": W, "H": H, "Xhat": Xhat, "time": tot_time, "iters": n_iter}
+
+    return val, best, best_model
+
+
+def evaluate_test_multi_init(
+    dataset_name: str,
+    best_params: dict,
+    *,
+    n_init: int = 10,
+    seed: int = 12345,
+):
+    """Evaluate at chosen hyper‑params with many random inits (as in 2022)."""
+    X, train_mask, _, test_mask = load_dataset(dataset_name)
+
+    test_scores, test_times, test_iters = [], [], []
+    for i in range(n_init):
+        W, H, Xhat, tot_time, n_iter = fit_nbmf_mm(
+            X, train_mask,
+            best_params["K"], best_params["alpha"], best_params["beta"],
+            seed=(seed + i) % (2**32-1)
+        )
+        ce = bernoulli_cross_entropy(X, Xhat, mask=test_mask)
+        test_scores.append(ce)
+        test_times.append(tot_time)
+        test_iters.append(n_iter)
+
+    return np.array(test_scores), np.array(test_times), np.array(test_iters)
+
+
+# ---------------------------
+# Main
 # ---------------------------
 if __name__ == "__main__":
-    # Reproduce 2022 protocol with our class. Defaults mirror the paper/code. :contentReference[oaicite:8]{index=8} :contentReference[oaicite:9]{index=9}
-    rng_seed = 12345
+    np.random.seed(12345)
+    ensure_dir(OUT_ROOT)
+
     datasets = ["animals", "paleo", "lastfm"]
-    data_dir = Path("data")
-    out_root = Path("outputs") / "chauhan2025"
-    split_root = Path("data") / "chauhan2025"
 
-    # Hyperparameters
-    max_iter = 2000
-    tol = 1e-8
-    n_init = 10
-    list_nfactors = [2, 4, 8, 16]
-    list_alpha = list_beta = list(np.linspace(1.0, 3.0, 11))
-
-    np.random.seed(rng_seed)
+    # Hyperparameter grids EXACTLY as in 2022 main_script.py
+    K_grid = [2, 4, 8, 16]
+    alpha_beta = np.linspace(1.0, 3.0, 11).tolist()
 
     for ds in datasets:
-        print(f"\n==== Dataset: {ds} ====")
-        # Load binary DF from .rda (as in 2022 repo)
-        df = pyreadr.read_r(str(data_dir / f"{ds}.rda"))[ds]
-        X = df.to_numpy(dtype=float)
+        print(f"\n==== {ds.upper()} ====")
+        out_dir = OUT_ROOT / ds
+        ensure_dir(out_dir)
 
-        # Build & save split masks
-        train_mask, val_mask, test_mask = build_split_masks(
-            X.shape, prop_train=0.70, prop_val=0.15, seed=rng_seed
-        )
-        ensure_dir(split_root)
-        np.savez(split_root / f"{ds}_split.npz",
-                 train_mask=train_mask, val_mask=val_mask, test_mask=test_mask)
-
-        # Output dir for this dataset
-        out_dir_ds = out_root / ds
-        ensure_dir(out_dir_ds)
-
-        # Validation grid, save best model and full val cube
-        best = training_with_validation(
-            X, train_mask, val_mask, list_nfactors, list_alpha, list_beta,
-            str(out_dir_ds), max_iter=max_iter, tol=tol, base_seed=rng_seed
-        )
-        print(f"Best (K, alpha, beta) on {ds}: {best}")
-
-        # Test-time multi-init evaluation at the chosen hyper-params
-        if best is None:  # fallback: load from model npz we just wrote
-            best = np.load(out_dir_ds / "nbmf-mm_model.npz", allow_pickle=True)["hyper_params"]
-        train_test_init(
-            X, train_mask, test_mask, best, str(out_dir_ds),
-            max_iter=max_iter, tol=tol, n_init=n_init, base_seed=rng_seed
+        # Validation grid
+        val_scores, best, best_model = run_validation_grid(
+            ds, K_grid, alpha_beta, alpha_beta, seed=12345
         )
 
-    print("\nAll done. Outputs are under outputs/chauhan2025 and splits under data/chauhan2025.")
+        # Save validation cube (same field names as 2022)
+        np.savez(
+            out_dir / "nbmf-mm_val.npz",
+            val_pplx=val_scores,
+            list_hyper=np.array([K_grid, alpha_beta, alpha_beta], dtype=object),
+        )
+
+        # Save best model with 2022‑compatible keys
+        np.savez(
+            out_dir / "nbmf-mm_model.npz",
+            W=best_model["W"],
+            H=best_model["H"],
+            Y_hat=best_model["Xhat"],
+            hyper_params=(int(best["K"]), float(best["alpha"]), float(best["beta"])),
+            time=float(best_model["time"]),
+            loss=None,
+            iters=best_model["iters"],
+            best_params=np.array(best, dtype=object),
+        )
+        print(f"Best (K, α, β) = ({best['K']}, {best['alpha']:.1f}, {best['beta']:.1f}); "
+              f"val CE = {best['score']:.6f}")
+
+        # Test‑set multi‑init evaluation
+        test_scores, test_times, test_iters = evaluate_test_multi_init(ds, best, n_init=10, seed=12345)
+        np.savez(
+            out_dir / "nbmf-mm_test_init.npz",
+            test_pplx=test_scores,   # 2022 scripts name it 'perplexity' but it's mean NLL
+            test_time=test_times,
+            test_iter=test_iters,
+            best_params=np.array(best, dtype=object),
+        )
+
+    print("\nDone. Results in outputs/chauhan2025/<dataset>/")
