@@ -1,5 +1,28 @@
-# Estimator front-end that calls the paper-exact MM helpers for "normalize"
-# and guarantees one-step parity & monotone MAP descent under that mode.
+# SPDX-License-Identifier: BSD-3-Clause
+"""
+NBMF-MM estimator: Bernoulli (mean-parameterized) NMF solved by MM.
+
+Implements Algorithm 1 of Magron & Févotte (2022) with a scikit-learn-style API
+and two symmetric orientations:
+
+- "beta-dir"  (Binary ICA):           W rows on the simplex; Beta prior on H
+- "dir-beta"  (Aspect Bernoulli):     H columns on the simplex; Beta prior on W
+
+Projection for the simplex-constrained factor:
+- projection_method="normalize" (**default; theory-first**): multiplicative
+  step followed by exact L1 renormalization (paper-faithful; monotone).
+- projection_method="duchi": routed to the same paper-exact step for parity
+  (the MM step already lands on the simplex).
+
+References
+----------
+- P. Magron and C. Févotte (2022).
+  “A majorization-minimization algorithm for nonnegative binary matrix
+   factorization.” IEEE SPL. (arXiv:2204.09741)
+- J. Duchi, S. Shalev-Shwartz, Y. Singer, T. Chandra (2008).
+  “Efficient Projections onto the ℓ₁-Ball for Learning in High Dimensions.”
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -34,10 +57,10 @@ def _canon_orientation(s: str) -> str:
 @dataclass
 class NBMF:
     """
-    NBMF-MM: Mean-parameterized Bernoulli NMF solved by Majorization–Minimization.
+    NBMF-MM: Mean-parameterized Bernoulli NMF solved by Majorization-Minimization.
 
-    Implements the NBMF‑MM algorithm of Magron & Févotte (2022) with a
-    scikit‑learn‑style API.
+    Implements the NBMF-MM algorithm of Magron & Févotte (2022) with a
+    scikit-learn-style API.
 
     Two symmetric orientations of the Bernoulli mean factorization X̂ = W H:
 
@@ -52,18 +75,18 @@ class NBMF:
 
     Projection choices for the simplex step:
       - "normalize" (default): multiplicative step + exact L1 renormalization.
-        This is **paper‑exact** and guarantees monotone decrease of the MAP objective.
-      - "duchi": Euclidean projection to the simplex (fast alternative, not MM‑monotone).
+        This is **paper-exact** and guarantees monotone decrease of the MAP objective.
+      - "duchi": Euclidean projection to the simplex (fast alternative, not MM-monotone).
 
     References
     ----------
     * P. Magron and C. Févotte (2022).
-      “A Majorization–Minimization Algorithm for Nonnegative Binary Matrix
+      “A Majorization-Minimization Algorithm for Nonnegative Binary Matrix
       Factorization.” IEEE Signal Processing Letters.
       (arXiv:2204.09741)
 
-    * J. C. Duchi, S. Shalev‑Shwartz, Y. Singer, and T. Chandra (2008).
-      “Efficient Projections onto the ℓ₁‑Ball for Learning in High Dimensions.”
+    * J. C. Duchi, S. Shalev-Shwartz, Y. Singer, and T. Chandra (2008).
+      “Efficient Projections onto the ℓ₁-Ball for Learning in High Dimensions.”
 
     Parameters
     ----------
@@ -82,7 +105,7 @@ class NBMF:
     n_init : int, default=1
         Number of random restarts (best MAP objective kept).
     projection_method : {"normalize","duchi"}, default="normalize"
-        Simplex step method. "normalize" is theory‑first (paper‑exact).
+        Simplex step method. "normalize" is theory-first (paper-exact).
     projection_backend : str, default="numpy"
         Placeholder for future accelerated backends; currently unused.
     use_numexpr : bool, default=False
@@ -91,7 +114,7 @@ class NBMF:
         Reserved; computations are pure NumPy right now.
     init_W, init_H : Optional[np.ndarray], default=None
         If provided, used verbatim as initialization (must satisfy orientation
-        constraints); enables strict one‑step parity tests.
+        constraints); enables strict one-step parity tests.
     eps : float, default=1e-12
         Numerical floor/ceiling for probabilities.
     """
