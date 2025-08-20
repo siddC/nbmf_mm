@@ -1,15 +1,15 @@
 """
-NBMF‑MM: Bernoulli (mean‑parameterized) nonnegative binary matrix factorization
-solved by Majorization–Minimization (MM), with a scikit‑learn‑style API.
+NBMF-MM: Bernoulli (mean-parameterized) nonnegative binary matrix factorization
+solved by Majorization-Minimization (MM), with a scikit-learn-style API.
 
-This estimator implements the **mean‑parameterized Bernoulli** model
+This estimator implements the **mean-parameterized Bernoulli** model
 :math:`Y_{mn} \\sim \\mathrm{Bernoulli}(\\theta_{mn})` with a *probability*
 matrix :math:`\\Theta = W H \\in (0,1)^{M\\times N}` and nonnegativity /
 simplex constraints on the factors. It follows the MM algorithm of
 **Magron & Févotte (2022)** and supports two *symmetric* orientations of the
 constraints and priors:
 
-- ``orientation="beta-dir"`` (paper’s default):
+- ``orientation="beta-dir"`` (paper's default):
   rows of :math:`W` lie on the probability simplex
   (:math:`\\sum_k W_{mk}=1,\\;W_{mk}\\ge 0`); entries of :math:`H` are in
   :math:`(0,1)` with a Beta(:math:`\\alpha,\\beta`) prior.
@@ -26,32 +26,32 @@ constraints and priors:
 
 A **binary mask** can be supplied to perform masked training (matrix completion):
 only observed entries contribute to the likelihood and updates. In the simplex
-steps, the paper‑exact **/N** (or **/M**) normalizer generalizes naturally by
+steps, the paper-exact **/N** (or **/M**) normalizer generalizes naturally by
 replacing :math:`N` (or :math:`M`) with the **number of observed entries per row
 (or per column)**, which maintains the simplex constraints under masking.
 
-The estimator logs the negative log‑posterior (up to constants) over iterations in
-``objective_history_`` and exposes both a ``score`` (−NLL per observed entry;
+The estimator logs the negative log-posterior (up to constants) over iterations in
+``objective_history_`` and exposes both a ``score`` (-NLL per observed entry;
 higher is better) and ``perplexity`` (:math:`\\exp` of the average NLL).
 
-**Projection choices for the simplex‑constrained factor**
+**Projection choices for the simplex-constrained factor**
 
-- ``projection_method="normalize"`` (paper‑exact, default): uses the closed‑form
+- ``projection_method="normalize"`` (**default; paper-exact**): uses the closed-form
   **/N** (or **/M**) normalizer *inside* the multiplicative update, which
   preserves the simplex exactly in exact arithmetic and enjoys the classical
   MM monotonicity guarantee.
 
 - ``projection_method="duchi"``: applies a Euclidean projection to the
-  probability simplex (Duchi et al., 2008) *after* the multiplicative step.
-  This is often fast and numerically near‑identical to the ``"normalize"`` path
+  probability simplex (Duchi et al., 2008) *after* the multiplicative step.
+  This is often fast and numerically near-identical to the ``"normalize"`` path
   (since the multiplicative step already lands on the simplex).
 
 **Notes**
 - Probabilities are clipped to :math:`[\\varepsilon, 1-\\varepsilon]` (default
   :math:`\\varepsilon=10^{-12}`) **only when evaluating the likelihood**, to
-  avoid under/overflow; the updates themselves follow Algorithm 1 exactly.
+  avoid under/overflow; the updates themselves follow Algorithm 1 exactly.
 - For the Beta prior, :math:`\\alpha,\\beta \\ge 1` are recommended; the
-  MM‑based bounds and in‑[0,1] preservation rely on this regime.
+  MM-based bounds and in-[0,1] preservation rely on this regime.
 - Multiple random initializations (``n_init``) are supported; the best solution
   by final objective is retained.
 - Masking is applied consistently in the ratio terms
@@ -65,19 +65,19 @@ n_components : int
 
 orientation : {"dir-beta", "beta-dir"}, default="dir-beta"
     Which factor carries the simplex constraint and which carries the Beta
-    prior. Several case‑insensitive aliases are accepted, e.g.
-    "Dir‑Beta", "Aspect Bernoulli" → "dir‑beta";
-    "Beta‑Dir", "Binary ICA", "bICA" → "beta‑dir".
+    prior. Several case-insensitive aliases are accepted, e.g.
+    "Dir-Beta", "Aspect Bernoulli" → "dir-beta";
+    "Beta-Dir", "Binary ICA", "bICA" → "beta-dir".
 
 alpha, beta : float, default=1.2
-    Shape parameters of the Beta prior placed on the *non‑simplex* factor.
+    Shape parameters of the Beta prior placed on the *non-simplex* factor.
     Values :math:`\\ge 1` are recommended.
 
 max_iter : int, default=2000
     Maximum number of MM iterations per initialization.
 
 tol : float, default=1e-6
-    Relative objective‑decrease tolerance for early stopping.
+    Relative objective-decrease tolerance for early stopping.
 
 random_state : int or None, default=None
     Seed for reproducible initialization.
@@ -86,9 +86,9 @@ n_init : int, default=1
     Number of random initializations. The best run by final objective is kept.
 
 projection_method : {"duchi", "normalize"}, default="normalize"
-    Strategy for enforcing the simplex constraint on the simplex‑constrained
-    factor. ``"normalize"`` uses the **paper‑exact** /N or /M normalizer;
-    ``"duchi"`` uses an ℓ₁‑simplex projection (Duchi et al., 2008).
+    Strategy for enforcing the simplex constraint on the simplex-constrained
+    factor. ``"normalize"`` uses the **paper-exact** /N or /M normalizer;
+    ``"duchi"`` uses an ℓ₁-simplex projection (Duchi et al., 2008).
 
 projection_backend : {"auto", "numpy", ...}, default="auto"
     Backend selector for the projection (placeholder; not used yet).
@@ -118,24 +118,24 @@ n_iter_ : int
     Number of iterations run for the selected (best) initialization.
 
 objective_history_ : list of float
-    Trace of the negative log‑posterior (up to constants) across iterations.
+    Trace of the negative log-posterior (up to constants) across iterations.
 
 reconstruction_err_ : float
-    Average negative log‑likelihood on the training data at convergence
+    Average negative log-likelihood on the training data at convergence
     (lower is better). Provided for reproducibility tests.
 
 References
 ----------
 - P. Magron and C. Févotte (2022).
-  *A majorization–minimization algorithm for nonnegative binary matrix
+  *A majorization-minimization algorithm for nonnegative binary matrix
   factorization.* IEEE Signal Processing Letters. (See also arXiv:2204.09741)
 
-- J. Duchi, S. Shalev‑Shwartz, Y. Singer, and T. Chandra (2008).
-  *Efficient Projections onto the ℓ₁‑Ball for Learning in High Dimensions.*
+- J. Duchi, S. Shalev-Shwartz, Y. Singer, and T. Chandra (2008).
+  *Efficient Projections onto the ℓ₁-Ball for Learning in High Dimensions.*
   Proceedings of ICML.
 
 - A. Lumbreras, L. Filstroff, and C. Févotte (2020).
-  *Bayesian Mean‑parameterized Nonnegative Binary Matrix Factorization.*
+  *Bayesian Mean-parameterized Nonnegative Binary Matrix Factorization.*
   Data Mining and Knowledge Discovery.
 
 Examples
@@ -306,16 +306,6 @@ class NBMF:
     # ------------------ Public API ------------------
 
     def fit(self, X: np.ndarray, mask: Optional[np.ndarray] = None):
-        # Accept SciPy sparse inputs
-        try:
-            import scipy.sparse as sp  # type: ignore
-            if sp.issparse(X):
-                X = X.toarray()
-            if mask is not None and sp.issparse(mask):
-                mask = mask.toarray()
-        except Exception:
-            pass
-
         X = np.asarray(X, dtype=float)
         if X.ndim != 2:
             raise ValueError("X must be a 2D array.")
@@ -347,12 +337,12 @@ class NBMF:
             obj_prev = np.inf
 
             for it in range(1, self.max_iter + 1):
-                # ---- sub‑step 1: build ratios from current reconstruction
+                # ---- sub-step 1: build ratios from current reconstruction
                 P = _clip01(W @ H, self.eps)
                 A, B = _compute_A_B(X, P, mask, self.eps)
 
                 if self.orientation == "beta-dir":
-                    # H ratio update (ADD pseudo‑counts, cf. Alg.1 Eqs. 14–16)
+                    # H ratio update (ADD pseudo-counts, cf. Alg.1 Eqs. 14-16)
                     C = H * (W.T @ A) + (self.alpha - 1.0)
                     D = (1.0 - H) * (W.T @ B) + (self.beta - 1.0)
                     H = C / (C + D + self.eps)
@@ -361,7 +351,7 @@ class NBMF:
                     P = _clip01(W @ H, self.eps)
                     A, B = _compute_A_B(X, P, mask, self.eps)
 
-                    # W simplex step (Alg.1 Eq. 20); masked uses per‑row counts
+                    # W simplex step (Alg.1 Eq. 20); masked uses per-row counts
                     numer = A @ H.T + B @ (1.0 - H).T  # MxK, nonnegative
                     if mask is None:
                         W_new = W * (numer / float(N))
@@ -375,10 +365,10 @@ class NBMF:
                     if self.projection_method == "duchi":
                         W = _project_rows_to_simplex(W_new)
                     else:
-                        W = W_new  # paper‑exact; no extra renorm
+                        W = W_new  # paper-exact; no extra renorm
 
                 else:  # dir-beta
-                    # W ratio update (ADD pseudo‑counts)
+                    # W ratio update (ADD pseudo-counts)
                     C = W * (A @ H.T) + (self.alpha - 1.0)
                     D = (1.0 - W) * (B @ (1.0 - H).T) + (self.beta - 1.0)
                     W = C / (C + D + self.eps)
@@ -387,7 +377,7 @@ class NBMF:
                     P = _clip01(W @ H, self.eps)
                     A, B = _compute_A_B(X, P, mask, self.eps)
 
-                    # H simplex step; masked uses per‑column counts
+                    # H simplex step; masked uses per-column counts
                     numer = W.T @ A + (1.0 - W).T @ B  # KxN
                     if mask is None:
                         H_new = H * (numer / float(M))
@@ -401,7 +391,7 @@ class NBMF:
                     if self.projection_method == "duchi":
                         H = _project_cols_to_simplex(H_new)
                     else:
-                        H = H_new  # paper‑exact; no extra renorm
+                        H = H_new  # paper-exact; no extra renorm
 
                 # ---- objective trace (NLL − log prior up to constants)
                 P = _clip01(W @ H, self.eps)
@@ -448,15 +438,6 @@ class NBMF:
         if self.components_ is None:
             raise RuntimeError("Call fit() before transform().")
         H = self.components_
-        # Accept SciPy sparse X/mask at inference
-        try:
-            import scipy.sparse as sp  # type: ignore
-            if sp.issparse(X):
-                X = X.toarray()
-            if mask is not None and sp.issparse(mask):
-                mask = mask.toarray()
-        except Exception:
-            pass
 
         X = np.asarray(X, dtype=float)
         M, N = X.shape
