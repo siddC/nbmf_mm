@@ -1,217 +1,229 @@
-# Copyright (c) 2025
-# nbmf_mm: Mean-parameterized Bernoulli NMF via Majorization–Minimization
-# Paper-exact MM helpers and objective.
+# src/nbmf_mm/_mm_exact.py
 from __future__ import annotations
 
-from typing import Optional, Tuple
-
 import numpy as np
+from typing import Optional, Tuple
 
 Array = np.ndarray
 
 
-# ----------------------------- small utilities ----------------------------- #
-
 def _clip01(X: Array, eps: float = 1e-12) -> Array:
-    """Clip to (eps, 1-eps) to avoid log/ratio blow-ups."""
+    """Clip to (eps, 1-eps) to avoid log/ratio singularities."""
     return np.clip(X, eps, 1.0 - eps)
 
 
-def _normalize_rows_to_one(X: Array) -> Array:
-    """Exact row L1 normalization (sum exactly 1.0)."""
-    s = X.sum(axis=1, keepdims=True)
-    # Safe divide: rows that are (numerically) zero become uniform
-    zero = (s <= 0.0)
-    X = X / np.where(s > 0.0, s, 1.0)
-    if np.any(zero):
-        m, k = X.shape
-        X[zero.ravel()] = 1.0 / k
-    return X
-
-
-def _normalize_cols_to_one(X: Array) -> Array:
-    """Exact column L1 normalization (sum exactly 1.0)."""
-    s = X.sum(axis=0, keepdims=True)
-    zero = (s <= 0.0)
-    X = X / np.where(s > 0.0, s, 1.0)
-    if np.any(zero):
-        k, n = X.shape
-        X[:, zero.ravel()] = 1.0 / k
-    return X
-
-
-# Exposed to tests for deterministic initializations
-def _dirichlet_rows(rng: np.random.Generator, M: int, K: int) -> Array:
-    """Draw M rows on the simplex of size K."""
-    X = rng.random((M, K))
-    return _normalize_rows_to_one(X)
-
-
-def _dirichlet_cols(rng: np.random.Generator, K: int, N: int) -> Array:
-    """Draw N columns on the simplex of size K."""
-    X = rng.random((K, N))
-    return _normalize_cols_to_one(X)
-
-
-# ----------------------------- likelihood & priors ----------------------------- #
-
-def bernoulli_nll(Y: Array, WH: Array, mask: Optional[Array],
-                  average: bool = False, eps: float = 1e-12) -> float:
+def bernoulli_nll(
+    Y: Array,
+    P: Array,
+    mask: Optional[Array] = None,
+    *,
+    average: bool = False,
+    eps: float = 1e-12,
+) -> float:
     """
-    Binary (Bernoulli) negative log-likelihood:
-        L(Y|P) = - sum_{m,n} [ y log p + (1-y) log (1-p) ]   (masked if provided)
+    Negative log-likelihood of a Bernoulli mean model.
+
+    Parameters
+    ----------
+    Y : array-like, shape (M, N)
+        Binary observations (0/1).
+    P : array-like, shape (M, N)
+        Mean-parameter (probabilities) in (0, 1).
+    mask : array-like of {0,1}, shape (M, N), optional (default=None)
+        If provided, entries with mask==0 are ignored.
+    average : bool, optional (default=False)
+        If True, return average per observed entry; else return sum.
+    eps : float
+        Numerical epsilon for clipping.
+
+    Returns
+    -------
+    nll : float
+        Negative log-likelihood (sum or average).
     """
-    P = _clip01(WH, eps)
-    if mask is not None:
-        Y = Y * mask
-        one_minus_Y = (1.0 - Y) * mask
+    P = _clip01(P, eps)
+    if mask is None:
+        ll = Y * np.log(P) + (1.0 - Y) * np.log(1.0 - P)
+        denom = Y.size
     else:
-        one_minus_Y = 1.0 - Y
-    nll = - (Y * np.log(P) + one_minus_Y * np.log(1.0 - P)).sum()
+        Wmask = mask.astype(P.dtype, copy=False)
+        ll = Wmask * (Y * np.log(P) + (1.0 - Y) * np.log(1.0 - P))
+        denom = np.maximum(Wmask.sum(), 1.0)  # avoid div by 0
+
+    nll = -float(ll.sum())
     if average:
-        denom = mask.sum() if mask is not None else Y.size
-        return float(nll / max(denom, 1))
-    return float(nll)
+        nll /= float(denom)
+    return nll
 
 
-def _beta_neglog_prior(X: Array, alpha: float, beta: float, eps: float) -> float:
+def _masked_ratios(
+    Y: Array, P: Array, mask: Optional[Array], eps: float
+) -> Tuple[Array, Array]:
     """
-    Negative log Beta prior (sum over entries; constant terms dropped):
-        - (alpha - 1) * sum log X - (beta - 1) * sum log(1 - X)
+    Compute A = (mask*Y)/P and B = (mask*(1-Y))/(1-P) (or without mask).
+    Shapes: Y,P,mask -> (M,N); returns (M,N).
     """
-    Xc = _clip01(X, eps)
-    return float(-(alpha - 1.0) * np.log(Xc).sum() - (beta - 1.0) * np.log(1.0 - Xc).sum())
-
-
-def objective(Y: Array, W: Array, H: Array, mask: Optional[Array],
-              orientation: str, alpha: float, beta: float,
-              eps: float = 1e-12) -> float:
-    """
-    MAP objective used in the paper (NLL + negative Beta prior on the unconstrained factor).
-    """
-    WH = W @ H
-    obj = bernoulli_nll(Y, WH, mask, average=False, eps=eps)
-    orientation = orientation.lower()
-    if orientation == "beta-dir":
-        # W rows on simplex; Beta(α,β) prior on H entries
-        obj += _beta_neglog_prior(H, alpha, beta, eps)
-    elif orientation == "dir-beta":
-        # H columns on simplex; Beta(α,β) prior on W entries
-        obj += _beta_neglog_prior(W, alpha, beta, eps)
-    else:
-        raise ValueError('orientation must be "beta-dir" or "dir-beta"')
-    return obj
-
-
-# ----------------------------- MM core ratios ----------------------------- #
-
-def _masked_ratios(Y: Array, WH: Array, mask: Optional[Array], eps: float
-                   ) -> Tuple[Array, Array]:
-    """
-    Compute A = Y / P, B = (1-Y) / (1-P), with optional masking.
-    """
-    P = _clip01(WH, eps)
-    if mask is not None:
-        A = (Y * mask) / P
-        B = ((1.0 - Y) * mask) / (1.0 - P)
-    else:
+    P = _clip01(P, eps)
+    if mask is None:
         A = Y / P
         B = (1.0 - Y) / (1.0 - P)
+    else:
+        Wmask = mask.astype(P.dtype, copy=False)
+        A = Wmask * (Y / P)
+        B = Wmask * ((1.0 - Y) / (1.0 - P))
     return A, B
 
 
-# ----------------------------- Paper-exact updates ----------------------------- #
-# IMPORTANT: These implement the MM updates exactly as in Magron & Févotte (2022).
-# The split into A (successes) and B (failures) must be respected. The simplex
-# factor uses exact L1 renormalization ("normalize" projection).
+def objective(
+    Y: Array,
+    W: Array,
+    H: Array,
+    mask: Optional[Array],
+    orientation: str,
+    alpha: float,
+    beta: float,
+    *,
+    eps: float = 1e-12,
+) -> float:
+    """
+    MAP objective = Bernoulli NLL + negative Beta log-prior
+    (prior applies only to the Beta-constrained block).
+    """
+    P = W @ H
+    nll = bernoulli_nll(Y, P, mask=mask, average=False, eps=eps)
+
+    if orientation == "beta-dir":
+        # Beta prior on H
+        Hp = _clip01(H, eps)
+        prior = - (alpha - 1.0) * np.log(Hp) - (beta - 1.0) * np.log(1.0 - Hp)
+        prior = float(prior.sum())
+    elif orientation == "dir-beta":
+        # Beta prior on W
+        Wp = _clip01(W, eps)
+        prior = - (alpha - 1.0) * np.log(Wp) - (beta - 1.0) * np.log(1.0 - Wp)
+        prior = float(prior.sum())
+    else:
+        raise ValueError('orientation must be "beta-dir" or "dir-beta"')
+
+    return nll + prior
 
 
-def mm_update_W_beta_dir(Y: Array, W: Array, H: Array,
-                         mask: Optional[Array], eps: float) -> Array:
+# ---- Block updates for one MM step (paper-exact path: "normalize") ---------
+
+def _update_W_rows_simplex(
+    Y: Array, W: Array, H: Array, mask: Optional[Array], eps: float
+) -> Array:
     """
-    Simplex-constrained W update (orientation: beta-dir). No Beta prior here.
-    W <- W * ((A @ H^T) / (B @ H^T)), then renormalize each row to sum 1.
+    Dirichlet-like constraint on rows of W (row-simplex).
+    Multiplicative update + exact L1 row normalization.
     """
-    A, B = _masked_ratios(Y, W @ H, mask, eps)
-    num = A @ H.T
-    den = B @ H.T
-    W = W * (num / np.maximum(den, eps))
-    W = _normalize_rows_to_one(np.maximum(W, eps))
+    P = W @ H
+    A, B = _masked_ratios(Y, P, mask, eps)  # (M,N)
+    num = A @ H.T                           # (M,K)
+    den = B @ H.T                           # (M,K)
+    W *= num / np.maximum(den, eps)
+    W = np.maximum(W, eps)
+    W /= np.sum(W, axis=1, keepdims=True)
     return W
 
 
-def mm_update_H_dir_beta(Y: Array, W: Array, H: Array,
-                         mask: Optional[Array], eps: float) -> Array:
+def _update_H_cols_simplex(
+    Y: Array, W: Array, H: Array, mask: Optional[Array], eps: float
+) -> Array:
     """
-    Simplex-constrained H update (orientation: dir-beta). No Beta prior here.
-    H <- H * ((W^T @ A) / (W^T @ B)), then renormalize each column to sum 1.
+    Dirichlet-like constraint on columns of H (column-simplex).
+    Multiplicative update + exact L1 column normalization.
     """
-    A, B = _masked_ratios(Y, W @ H, mask, eps)
-    num = W.T @ A
-    den = W.T @ B
-    H = H * (num / np.maximum(den, eps))
-    H = _normalize_cols_to_one(np.maximum(H, eps))
+    P = W @ H
+    A, B = _masked_ratios(Y, P, mask, eps)  # (M,N)
+    num = W.T @ A                            # (K,N)
+    den = W.T @ B                            # (K,N)
+    H *= num / np.maximum(den, eps)
+    H = np.maximum(H, eps)
+    H /= np.sum(H, axis=0, keepdims=True)
     return H
 
 
-def mm_update_H_beta_dir(Y: Array, W: Array, H: Array,
-                         alpha: float, beta: float,
-                         mask: Optional[Array], eps: float) -> Array:
+def _update_H_beta_dir(
+    Y: Array,
+    W: Array,
+    H: Array,
+    alpha: float,
+    beta: float,
+    mask: Optional[Array],
+    eps: float,
+) -> Array:
     """
-    Beta-regularized H update (orientation: beta-dir).
-    H <- H * ( W^T A + (α-1)/H ) / ( W^T B + (β-1)/(1-H) )
+    Beta-constrained H update for orientation 'beta-dir'.
+    Multiplicative MM with (alpha-1)/H and (beta-1)/(1-H) terms.
     """
-    A, B = _masked_ratios(Y, W @ H, mask, eps)
-    Hc = _clip01(H, eps)
-    num = (W.T @ A) + (alpha - 1.0) / Hc
-    den = (W.T @ B) + (beta - 1.0) / (1.0 - Hc)
-    H = Hc * (num / np.maximum(den, eps))
+    P = W @ H
+    A, B = _masked_ratios(Y, P, mask, eps)  # (M,N)
+    num = (W.T @ A) + (alpha - 1.0) / _clip01(H, eps)
+    den = (W.T @ B) + (beta - 1.0) / _clip01(1.0 - H, eps)
+    H *= num / np.maximum(den, eps)
     H = _clip01(H, eps)
     return H
 
 
-def mm_update_W_dir_beta(Y: Array, W: Array, H: Array,
-                         alpha: float, beta: float,
-                         mask: Optional[Array], eps: float) -> Array:
+def _update_W_beta_dirbeta(
+    Y: Array,
+    W: Array,
+    H: Array,
+    alpha: float,
+    beta: float,
+    mask: Optional[Array],
+    eps: float,
+) -> Array:
     """
-    Beta-regularized W update (orientation: dir-beta).
-    W <- W * ( A H^T + (α-1)/W ) / ( B H^T + (β-1)/(1-W) )
+    Beta-constrained W update for orientation 'dir-beta'.
+    Multiplicative MM with (alpha-1)/W and (beta-1)/(1-W) terms.
     """
-    A, B = _masked_ratios(Y, W @ H, mask, eps)
-    Wc = _clip01(W, eps)
-    num = (A @ H.T) + (alpha - 1.0) / Wc
-    den = (B @ H.T) + (beta - 1.0) / (1.0 - Wc)
-    W = Wc * (num / np.maximum(den, eps))
+    P = W @ H
+    A, B = _masked_ratios(Y, P, mask, eps)  # (M,N)
+    num = (A @ H.T) + (alpha - 1.0) / _clip01(W, eps)
+    den = (B @ H.T) + (beta - 1.0) / _clip01(1.0 - W, eps)
+    W *= num / np.maximum(den, eps)
     W = _clip01(W, eps)
     return W
 
 
-def mm_step_beta_dir(Y: Array, W: Array, H: Array,
-                     alpha: float, beta: float,
-                     mask: Optional[Array] = None, eps: float = 1e-12
-                     ) -> Tuple[Array, Array]:
+# Public one-step helpers used in tests
+def mm_step_beta_dir(
+    Y: Array,
+    W: Array,
+    H: Array,
+    alpha: float,
+    beta: float,
+    mask: Optional[Array] = None,
+    *,
+    eps: float = 1e-12,
+) -> Tuple[Array, Array]:
     """
-    One full MM step for orientation='beta-dir' (Binary ICA):
-      1) W: simplex multiplicative step + exact row normalization
-      2) H: Beta-regularized multiplicative step
-    This ordering matches the helper used in tests; keep it **exact** for parity.
+    One MM step for orientation 'beta-dir':
+      - Update H with Beta prior (multiplicative)
+      - Update W by multiplicative + row L1-normalization
     """
-    W = mm_update_W_beta_dir(Y, W, H, mask, eps)
-    # Use the updated W when updating H (Gauss–Seidel), as in the paper.
-    H = mm_update_H_beta_dir(Y, W, H, alpha, beta, mask, eps)
+    H = _update_H_beta_dir(Y, W, H, alpha, beta, mask, eps)
+    W = _update_W_rows_simplex(Y, W, H, mask, eps)
     return W, H
 
 
-def mm_step_dir_beta(Y: Array, W: Array, H: Array,
-                     alpha: float, beta: float,
-                     mask: Optional[Array] = None, eps: float = 1e-12
-                     ) -> Tuple[Array, Array]:
+def mm_step_dir_beta(
+    Y: Array,
+    W: Array,
+    H: Array,
+    alpha: float,
+    beta: float,
+    mask: Optional[Array] = None,
+    *,
+    eps: float = 1e-12,
+) -> Tuple[Array, Array]:
     """
-    One full MM step for orientation='dir-beta' (Aspect Bernoulli):
-      1) W: Beta-regularized multiplicative step
-      2) H: simplex multiplicative step + exact column normalization
-    This ordering matches the helper used in tests; keep it **exact** for parity.
+    One MM step for orientation 'dir-beta':
+      - Update W with Beta prior (multiplicative)
+      - Update H by multiplicative + column L1-normalization
     """
-    W = mm_update_W_dir_beta(Y, W, H, alpha, beta, mask, eps)
-    H = mm_update_H_dir_beta(Y, W, H, mask, eps)
+    W = _update_W_beta_dirbeta(Y, W, H, alpha, beta, mask, eps)
+    H = _update_H_cols_simplex(Y, W, H, mask, eps)
     return W, H
