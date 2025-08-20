@@ -19,7 +19,7 @@ optimized or fused; production code should use your library's vectorized
 kernels, numexpr, numba, etc.
 
 References:
-  P. Magron and C. Févotte (2022). "A majorization–minimization algorithm
+  P. Magron and C. Févotte (2022). "A majorization-minimization algorithm
   for nonnegative binary matrix factorization".
 """
 from __future__ import annotations

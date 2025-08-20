@@ -2,48 +2,45 @@ name: CI
 
 on:
   push:
+    branches: [ main, master ]
   pull_request:
+    branches: [ main, master ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
-    name: test (py${{ matrix.py }})
+  tests:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        py: ["3.9", "3.10", "3.11", "3.12"]
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      # If you keep pixi in pyproject.toml this just works.
-      - uses: prefix-dev/setup-pixi@v0
+      - name: Set up pixi
+        uses: prefix-dev/setup-pixi@v0.8.1
         with:
-          log-level: v
+          cache: true  # cache pixi env to speed up CI
 
-      # Build the editable install + dev deps and run tests in the pixi env
-      - run: pixi run python -V
-      - run: pixi run pip list
-      - run: pixi run pytest -q
+      - name: Show versions
+        run: |
+          pixi --version
+          pixi run python --version
 
-  pixi-env-smoke:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: prefix-dev/setup-pixi@v0
-      - run: pixi run python -V
+      # Install your package into the pixi environment so tests can import nbmf_mm._mm_exact
+      - name: Install nbmf_mm (editable)
+        run: |
+          pixi run python -m pip install --no-deps -e .
+          # If you defined extras like [tests], you can do:
+          # pixi run python -m pip install --no-deps -e .[tests]
 
-  build-sdist-wheel:
-    needs: [test]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - run: python -m pip install -U build
-      - run: python -m build
-      - uses: actions/upload-artifact@v4
-        with:
-          name: dist
-          path: dist/*
+      # Run tests (PYTHONPATH=src ensures src-layout works even without install)
+      - name: Run pytest
+        env:
+          PYTHONPATH: src
+        run: |
+          pixi run pytest -q
