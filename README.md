@@ -40,3 +40,103 @@ API and two symmetric orientations:
 
 ```bash
 pip install nbmf-mm
+```
+
+From source:
+```bash
+pip install "git+https://github.com/siddC/nbmf_mm"
+```
+
+Optional extras:
+```bash
+# scikit-learn integration & NNDSVD-style init (if you enable it later)
+pip install "nbmf-mm[sklearn]"
+
+# docs build stack
+pip install "nbmf-mm[docs]"
+```
+
+---
+
+## Quick Start
+
+```python
+import numpy as np
+from nbmf_mm import NBMF
+
+rng = np.random.default_rng(0)
+X = (rng.random((100, 500)) < 0.25).astype(float)   # binary {0,1} or probabilities in [0,1]
+
+# Theory-first default: monotone MM with paper-exact normalizer
+model = NBMF(n_components=6, orientation="dir-beta",
+             alpha=1.2, beta=1.2, random_state=0).fit(Y)
+
+W = model.W_                 # shape (n_samples, n_components)
+H = model.components_        # shape (n_components, n_features)
+Xhat = model.inverse_transform(W)  # probabilities in (0,1)
+
+# Transform new data using fixed components H
+Y_new = (rng.random((10, 500)) < 0.25).astype(float)
+W_new = model.transform(Y_new)     # shape (10, n_components)
+
+# Masked training / hold-out validation
+mask = (rng.random(X.shape) < 0.9).astype(float)  # observe 90% of entries
+model = NBMF(n_components=20).fit(X, mask=mask)
+
+print("score (−NLL per observed entry):", model.score(X, mask=mask))
+print("perplexity:", model.perplexity(X, mask=mask))
+```
+
+To use the fast projection alternative:
+```python
+model = NBMF(n_components=6, orientation="dir-beta",
+             projection_method="duchi", random_state=0).fit(Y)
+```
+
+---
+
+## Why two orientations?
+
+- dir-beta (Aspect Bernoulli) — H columns are on the simplex → each feature (e.g., gene) has interpretable mixture memberships across latent aspects. W carries sample‑specific propensities with a Beta prior.
+
+- beta-dir (Binary ICA) — W rows are on the simplex; H is Beta‑constrained.
+
+Both solve the same Bernoulli mean‑parameterized factorization with different geometric constraints; pick the one that best matches your interpretability needs.
+
+---
+
+## API Hightlihts
+
+NBMF(
+  n_components: int,
+  orientation: {"dir-beta","beta-dir"} = "dir-beta",
+  alpha: float = 1.2,
+  beta: float = 1.2,
+  projection_method: {"normalize","duchi"} = "normalize",
+  max_iter: int = 2000,
+  tol: float = 1e-6,
+  random_state: int | None = None,
+  n_init: int = 1,
+  # accepted for compatibility (currently unused in core Python impl)
+  use_numexpr: bool = False,
+  use_numba: bool = False,
+  projection_backend: str = "auto",
+)
+
+---
+
+## Reproducibility
+- Set `random_state` (int) for reproducible initialization.
+- Use `n_init > 1` to run several random restarts and keep the best NLL.
+---
+
+## References
+- **Simplex projection** (default):
+  - J. Duchi, S. Shalev‑Shwartz, Y. Singer, T. Chandra (2008).
+  Efficient Projections onto the ℓ₁‑Ball for Learning in High Dimensions. ICML 2008.
+  
+  - W. Wang, M. Á. Carreira‑Perpiñán (2013).
+  Projection onto the probability simplex: An efficient algorithm with a simple proof, and an application. arXiv:1309.1541.
+  
+  - Bayesian NBMF (related, slower but fully Bayesian):
+    - See the `NBMF` project by alumbreras for reference implementations of Bayesian variants.
