@@ -18,22 +18,26 @@ Array = np.ndarray
 
 
 def _clip01(X: Array, eps: float = 1e-12) -> Array:
+    # Only for numerically safe logs / final clipping — NOT used in A,B!
     return np.clip(X, a_min=eps, a_max=1.0 - eps)
 
 
 def _masked_ratios(Y: Array, WH: Array, mask: Array | None, eps: float):
-    P = _clip01(WH, eps)
+    # IMPORTANT: use raw WH here to preserve MM identities; no clipping.
     if mask is None:
-        return Y / P, (1.0 - Y) / (1.0 - P)
+        return Y / WH, (1.0 - Y) / (1.0 - WH)
     A = np.zeros_like(Y)
     B = np.zeros_like(Y)
     nz = mask.astype(bool)
-    A[nz] = Y[nz] / P[nz]
-    B[nz] = (1.0 - Y[nz]) / (1.0 - P[nz])
+    A[nz] = Y[nz] / WH[nz]
+    B[nz] = (1.0 - Y[nz]) / (1.0 - WH[nz])
     return A, B
 
 
-def bernoulli_nll(Y: Array, WH: Array, mask: Array | None = None, average: bool = False, eps: float = 1e-12) -> float:
+def bernoulli_nll(
+    Y: Array, WH: Array, mask: Array | None = None, average: bool = False, eps: float = 1e-12
+) -> float:
+    # Safe logs for reporting
     P = _clip01(WH, eps)
     if mask is None:
         nll = -(np.sum(Y * np.log(P)) + np.sum((1.0 - Y) * np.log1p(-P)))
@@ -50,7 +54,16 @@ def beta_log_prior(Z: Array, alpha: float, beta: float, eps: float = 1e-12) -> f
     return float(np.sum((alpha - 1.0) * np.log(Z) + (beta - 1.0) * np.log1p(-Z)))
 
 
-def objective(Y: Array, W: Array, H: Array, mask: Array | None, orientation: str, alpha: float, beta: float, eps: float = 1e-12) -> float:
+def objective(
+    Y: Array,
+    W: Array,
+    H: Array,
+    mask: Array | None,
+    orientation: str,
+    alpha: float,
+    beta: float,
+    eps: float = 1e-12,
+) -> float:
     WH = W @ H
     nll = bernoulli_nll(Y, WH, mask, average=False, eps=eps)
     if orientation == "beta-dir":
@@ -61,23 +74,32 @@ def objective(Y: Array, W: Array, H: Array, mask: Array | None, orientation: str
         raise ValueError("orientation must be 'beta-dir' or 'dir-beta'")
 
 
-# -------- beta-dir
-def mm_update_H_beta_dir(Y: Array, W: Array, H: Array, alpha: float, beta: float, mask: Array | None = None, eps: float = 1e-12) -> Array:
+# ---------------- beta-dir: Beta prior on H; W rows on simplex ----------------
+
+def mm_update_H_beta_dir(
+    Y: Array, W: Array, H: Array, alpha: float, beta: float, mask: Array | None = None, eps: float = 1e-12
+) -> Array:
     WH = W @ H
     A, B = _masked_ratios(Y, WH, mask, eps)
-    # ADD pseudo-counts
+    # Add pseudo-counts (not multiplied) — Algorithm 1
     C = H * (W.T @ A) + (alpha - 1.0)
     D = (1.0 - H) * (W.T @ B) + (beta - 1.0)
     return _clip01(C / (C + D + eps), eps)
 
 
-def mm_update_W_beta_dir(Y: Array, W: Array, H: Array, mask: Array | None = None, eps: float = 1e-12) -> Array:
+def mm_update_W_beta_dir(
+    Y: Array, W: Array, H: Array, mask: Array | None = None, eps: float = 1e-12
+) -> Array:
     M, N = Y.shape
     WH = W @ H
     A, B = _masked_ratios(Y, WH, mask, eps)
-    numer = A @ H.T + B @ (1.0 - H).T  # MxK
+    numer = A @ H.T + B @ (1.0 - H).T  # MxK, nonnegative
+
     if mask is None:
+        # Paper-exact /N normalizer preserves each row-sum exactly
         return W * (numer / float(N))
+
+    # Masked: per-row observed counts preserve row-simplex
     row_counts = np.asarray(mask.sum(axis=1), dtype=float).reshape(-1, 1)
     Wn = W.copy()
     rows = (row_counts.squeeze() > 0)
@@ -86,29 +108,40 @@ def mm_update_W_beta_dir(Y: Array, W: Array, H: Array, mask: Array | None = None
     return Wn
 
 
-def mm_step_beta_dir(Y: Array, W: Array, H: Array, alpha: float, beta: float, mask: Array | None = None, eps: float = 1e-12):
+def mm_step_beta_dir(
+    Y: Array, W: Array, H: Array, alpha: float, beta: float, mask: Array | None = None, eps: float = 1e-12
+):
     H = mm_update_H_beta_dir(Y, W, H, alpha, beta, mask, eps)
     W = mm_update_W_beta_dir(Y, W, H, mask, eps)
     return W, H
 
 
-# -------- dir-beta
-def mm_update_W_dir_beta(Y: Array, W: Array, H: Array, alpha: float, beta: float, mask: Array | None = None, eps: float = 1e-12) -> Array:
+# ---------------- dir-beta: Beta prior on W; H columns on simplex --------------
+
+def mm_update_W_dir_beta(
+    Y: Array, W: Array, H: Array, alpha: float, beta: float, mask: Array | None = None, eps: float = 1e-12
+) -> Array:
     WH = W @ H
     A, B = _masked_ratios(Y, WH, mask, eps)
-    # ADD pseudo-counts
+    # Add pseudo-counts (not multiplied)
     C = W * (A @ H.T) + (alpha - 1.0)
     D = (1.0 - W) * (B @ (1.0 - H).T) + (beta - 1.0)
     return _clip01(C / (C + D + eps), eps)
 
 
-def mm_update_H_dir_beta(Y: Array, W: Array, H: Array, mask: Array | None = None, eps: float = 1e-12) -> Array:
+def mm_update_H_dir_beta(
+    Y: Array, W: Array, H: Array, mask: Array | None = None, eps: float = 1e-12
+) -> Array:
     M, N = Y.shape
     WH = W @ H
     A, B = _masked_ratios(Y, WH, mask, eps)
     numer = W.T @ A + (1.0 - W).T @ B  # KxN
+
     if mask is None:
+        # Paper-exact /M normalizer preserves each column-sum exactly
         return H * (numer / float(M))
+
+    # Masked: per-column observed counts preserve column-simplex
     col_counts = np.asarray(mask.sum(axis=0), dtype=float).reshape(1, -1)
     Hn = H.copy()
     cols = (col_counts.squeeze() > 0)
@@ -117,7 +150,9 @@ def mm_update_H_dir_beta(Y: Array, W: Array, H: Array, mask: Array | None = None
     return Hn
 
 
-def mm_step_dir_beta(Y: Array, W: Array, H: Array, alpha: float, beta: float, mask: Array | None = None, eps: float = 1e-12):
+def mm_step_dir_beta(
+    Y: Array, W: Array, H: Array, alpha: float, beta: float, mask: Array | None = None, eps: float = 1e-12
+):
     W = mm_update_W_dir_beta(Y, W, H, alpha, beta, mask, eps)
     H = mm_update_H_dir_beta(Y, W, H, mask, eps)
     return W, H

@@ -1,8 +1,8 @@
 """
-NBMF-MM: Bernoulli (mean-parameterized) nonnegative binary matrix factorization
-solved by Majorization-Minimization (MM), with a scikit-learn-style API.
+NBMF -MM: Bernoulli (mean -parameterized) nonnegative binary matrix factorization
+solved by Majorization -Minimization (MM), with a scikit -learn -style API.
 
-This estimator implements the **mean-parameterized Bernoulli** model
+This estimator implements the **mean -parameterized Bernoulli** model
 :math:`Y_{mn} \\sim \\mathrm{Bernoulli}(\\theta_{mn})` with a *probability*
 matrix :math:`\\Theta = W H \\in (0,1)^{M\\times N}` and nonnegativity /
 simplex constraints on the factors. It follows the MM algorithm of
@@ -26,32 +26,32 @@ constraints and priors:
 
 A **binary mask** can be supplied to perform masked training (matrix completion):
 only observed entries contribute to the likelihood and updates. In the simplex
-steps, the paper-exact **/N** (or **/M**) normalizer generalizes naturally by
+steps, the paper -exact **/N** (or **/M**) normalizer generalizes naturally by
 replacing :math:`N` (or :math:`M`) with the **number of observed entries per row
 (or per column)**, which maintains the simplex constraints under masking.
 
-The estimator logs the negative log-posterior (up to constants) over iterations in
+The estimator logs the negative log -posterior (up to constants) over iterations in
 ``objective_history_`` and exposes both a ``score`` (-NLL per observed entry;
 higher is better) and ``perplexity`` (:math:`\\exp` of the average NLL).
 
-**Projection choices for the simplex-constrained factor**
+**Projection choices for the simplex -constrained factor**
 
-- ``projection_method="normalize"`` (**default; paper-exact**): uses the closed-form
+- ``projection_method="normalize"`` (**default; paper -exact**): uses the closed -form
   **/N** (or **/M**) normalizer *inside* the multiplicative update, which
   preserves the simplex exactly in exact arithmetic and enjoys the classical
   MM monotonicity guarantee.
 
 - ``projection_method="duchi"``: applies a Euclidean projection to the
   probability simplex (Duchi et al., 2008) *after* the multiplicative step.
-  This is often fast and numerically near-identical to the ``"normalize"`` path
+  This is often fast and numerically near -identical to the ``"normalize"`` path
   (since the multiplicative step already lands on the simplex).
 
 **Notes**
-- Probabilities are clipped to :math:`[\\varepsilon, 1-\\varepsilon]` (default
-  :math:`\\varepsilon=10^{-12}`) **only when evaluating the likelihood**, to
-  avoid under/overflow; the updates themselves follow Algorithm 1 exactly.
+- Probabilities are **not clipped** during the **updates** (to maintain the
+  MM identities). We only clip to :math:`[\\varepsilon, 1-\\varepsilon]`
+  (default :math:`\\varepsilon=10^{-12}`) **when evaluating the likelihood**.
 - For the Beta prior, :math:`\\alpha,\\beta \\ge 1` are recommended; the
-  MM-based bounds and in-[0,1] preservation rely on this regime.
+  MM -based bounds and in -[0,1] preservation rely on this regime.
 - Multiple random initializations (``n_init``) are supported; the best solution
   by final objective is retained.
 - Masking is applied consistently in the ratio terms
@@ -65,19 +65,19 @@ n_components : int
 
 orientation : {"dir-beta", "beta-dir"}, default="dir-beta"
     Which factor carries the simplex constraint and which carries the Beta
-    prior. Several case-insensitive aliases are accepted, e.g.
-    "Dir-Beta", "Aspect Bernoulli" → "dir-beta";
-    "Beta-Dir", "Binary ICA", "bICA" → "beta-dir".
+    prior. Several case -insensitive aliases are accepted, e.g.
+    "Dir -Beta", "Aspect Bernoulli" → "dir -beta";
+    "Beta -Dir", "Binary ICA", "bICA" → "beta -dir".
 
 alpha, beta : float, default=1.2
-    Shape parameters of the Beta prior placed on the *non-simplex* factor.
+    Shape parameters of the Beta prior placed on the *non -simplex* factor.
     Values :math:`\\ge 1` are recommended.
 
 max_iter : int, default=2000
     Maximum number of MM iterations per initialization.
 
 tol : float, default=1e-6
-    Relative objective-decrease tolerance for early stopping.
+    Relative objective -decrease tolerance for early stopping.
 
 random_state : int or None, default=None
     Seed for reproducible initialization.
@@ -86,9 +86,9 @@ n_init : int, default=1
     Number of random initializations. The best run by final objective is kept.
 
 projection_method : {"duchi", "normalize"}, default="normalize"
-    Strategy for enforcing the simplex constraint on the simplex-constrained
-    factor. ``"normalize"`` uses the **paper-exact** /N or /M normalizer;
-    ``"duchi"`` uses an ℓ₁-simplex projection (Duchi et al., 2008).
+    Strategy for enforcing the simplex constraint on the simplex -constrained
+    factor. ``"normalize"`` uses the **paper -exact** /N or /M normalizer;
+    ``"duchi"`` uses an ℓ₁ -simplex projection (Duchi et al., 2008).
 
 projection_backend : {"auto", "numpy", ...}, default="auto"
     Backend selector for the projection (placeholder; not used yet).
@@ -118,38 +118,25 @@ n_iter_ : int
     Number of iterations run for the selected (best) initialization.
 
 objective_history_ : list of float
-    Trace of the negative log-posterior (up to constants) across iterations.
+    Trace of the negative log -posterior (up to constants) across iterations.
 
 reconstruction_err_ : float
-    Average negative log-likelihood on the training data at convergence
+    Average negative log -likelihood on the training data at convergence
     (lower is better). Provided for reproducibility tests.
 
 References
 ----------
 - P. Magron and C. Févotte (2022).
-  *A majorization-minimization algorithm for nonnegative binary matrix
+  *A majorization -minimization algorithm for nonnegative binary matrix
   factorization.* IEEE Signal Processing Letters. (See also arXiv:2204.09741)
 
-- J. Duchi, S. Shalev-Shwartz, Y. Singer, and T. Chandra (2008).
-  *Efficient Projections onto the ℓ₁-Ball for Learning in High Dimensions.*
+- J. Duchi, S. Shalev -Shwartz, Y. Singer, and T. Chandra (2008).
+  *Efficient Projections onto the ℓ₁ -Ball for Learning in High Dimensions.*
   Proceedings of ICML.
 
 - A. Lumbreras, L. Filstroff, and C. Févotte (2020).
-  *Bayesian Mean-parameterized Nonnegative Binary Matrix Factorization.*
+  *Bayesian Mean -parameterized Nonnegative Binary Matrix Factorization.*
   Data Mining and Knowledge Discovery.
-
-Examples
---------
->>> from nbmf_mm import NBMF
->>> import numpy as np
->>> rng = np.random.default_rng(0)
->>> Y = (rng.random((50, 80)) < 0.2).astype(float)
->>> model = NBMF(n_components=6, orientation="beta-dir",
-...              alpha=1.2, beta=1.2, projection_method="normalize",
-...              random_state=0).fit(Y)
->>> Yhat = model.W_ @ model.components_
->>> perp = model.perplexity(Y)
->>> round(perp, 6)  # doctest: +SKIP
 """
 from __future__ import annotations
 
@@ -158,23 +145,24 @@ from typing import Optional, Tuple
 
 import numpy as np
 
-# ======================================================================
-# Numerics & helpers
-# ======================================================================
 
 _EPS = 1e-12
 
 
 def _clip01(X: np.ndarray, eps: float = _EPS) -> np.ndarray:
-    """Clip to the open interval (eps, 1-eps) for safe log/ratio operations."""
+    """Clip to the open interval (eps, 1-eps) for safe log/ratio **reporting**."""
     return np.clip(X, a_min=eps, a_max=1.0 - eps)
 
 
 def _compute_A_B(
     Y: np.ndarray, P: np.ndarray, mask: Optional[np.ndarray], eps: float
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Return A = Y/P and B = (1-Y)/(1-P), respecting an optional binary mask."""
-    P = _clip01(P, eps)
+    """
+    Return A = Y/P and B = (1-Y)/(1-P), respecting an optional binary mask.
+
+    IMPORTANT: Do **not** clip P here; using raw P preserves the MM identities
+    that make the simplex-preserving denominators (/N or /M) exact.
+    """
     if mask is None:
         return Y / P, (1.0 - Y) / (1.0 - P)
 
@@ -189,7 +177,7 @@ def _compute_A_B(
 def _bernoulli_nll(
     Y: np.ndarray, P: np.ndarray, mask: Optional[np.ndarray], average: bool, eps: float
 ) -> float:
-    """Negative log-likelihood for Bernoulli with optional masking."""
+    """Negative log-likelihood for Bernoulli with optional masking (safe logs)."""
     P = _clip01(P, eps)
     if mask is None:
         nll = -(np.sum(Y * np.log(P)) + np.sum((1.0 - Y) * np.log1p(-P)))
@@ -207,12 +195,8 @@ def _beta_log_prior(Z: np.ndarray, alpha: float, beta: float, eps: float) -> flo
     return float(np.sum((alpha - 1.0) * np.log(Z) + (beta - 1.0) * np.log1p(-Z)))
 
 
-# ======================================================================
-# Simplex projections (Duchi et al. 2008)
-# ======================================================================
-
 def _project_rows_to_simplex(W: np.ndarray) -> np.ndarray:
-    """Project each row onto the probability simplex."""
+    """Euclidean projection of each row onto the probability simplex (Duchi)."""
     M, K = W.shape
     Wp = np.empty_like(W)
     for m in range(M):
@@ -229,11 +213,11 @@ def _project_rows_to_simplex(W: np.ndarray) -> np.ndarray:
         x[x < 0.0] = 0.0
         s = x.sum()
         Wp[m] = (x / s) if s != 0.0 else np.full_like(x, 1.0 / K)
-    return _clip01(Wp)
+    return Wp
 
 
 def _project_cols_to_simplex(H: np.ndarray) -> np.ndarray:
-    """Project each column onto the probability simplex."""
+    """Euclidean projection of each column onto the probability simplex (Duchi)."""
     K, N = H.shape
     Hp = np.empty_like(H)
     for n in range(N):
@@ -250,16 +234,11 @@ def _project_cols_to_simplex(H: np.ndarray) -> np.ndarray:
         x[x < 0.0] = 0.0
         s = x.sum()
         Hp[:, n] = (x / s) if s != 0.0 else np.full(K, 1.0 / K)
-    return _clip01(Hp)
+    return Hp
 
-
-# ======================================================================
-# Orientation canonicalization
-# ======================================================================
 
 def _canon_orientation(o: str) -> str:
     s = str(o).strip().lower().replace("_", "-").replace(" ", "-")
-    # Common aliases
     dirbeta = {"dir-beta", "dirbeta", "aspect-bernoulli", "aspect", "aspectbernoulli"}
     betadir = {"beta-dir", "betadir", "binary-ica", "binaryica", "bica"}
     if s in dirbeta:
@@ -271,10 +250,6 @@ def _canon_orientation(o: str) -> str:
     raise ValueError('orientation must be "beta-dir" or "dir-beta"')
 
 
-# ======================================================================
-# Estimator
-# ======================================================================
-
 @dataclass
 class NBMF:
     n_components: int
@@ -285,10 +260,10 @@ class NBMF:
     tol: float = 1e-6
     random_state: Optional[int] = None
     n_init: int = 1
-    projection_method: str = "normalize"   # MM-faithful by default
+    projection_method: str = "normalize"   # theory-first default
     projection_backend: str = "auto"
     use_numexpr: bool = False
-    use_numba: bool = False               # accepted but unused (API compat)
+    use_numba: bool = False
     init_W: Optional[np.ndarray] = None
     init_H: Optional[np.ndarray] = None
     eps: float = _EPS
@@ -306,6 +281,16 @@ class NBMF:
     # ------------------ Public API ------------------
 
     def fit(self, X: np.ndarray, mask: Optional[np.ndarray] = None):
+        # Accept SciPy sparse inputs (tests expect this)
+        try:
+            import scipy.sparse as sp  # type: ignore
+            if sp.issparse(X):
+                X = X.toarray()
+            if mask is not None and sp.issparse(mask):
+                mask = mask.toarray()
+        except Exception:
+            pass
+
         X = np.asarray(X, dtype=float)
         if X.ndim != 2:
             raise ValueError("X must be a 2D array.")
@@ -324,7 +309,7 @@ class NBMF:
         rng = np.random.default_rng(self.random_state)
 
         for init_idx in range(max(1, int(self.n_init))):
-            # initialization that respects constraints
+            # initialization that respects constraints and keeps entries > 0
             if self.init_W is not None and self.init_H is not None and init_idx == 0:
                 W = np.asarray(self.init_W, dtype=float).copy()
                 H = np.asarray(self.init_H, dtype=float).copy()
@@ -337,24 +322,24 @@ class NBMF:
             obj_prev = np.inf
 
             for it in range(1, self.max_iter + 1):
-                # ---- sub-step 1: build ratios from current reconstruction
-                P = _clip01(W @ H, self.eps)
+                # ---- sub -step 1
+                P = W @ H  # raw P — do NOT clip here
                 A, B = _compute_A_B(X, P, mask, self.eps)
 
                 if self.orientation == "beta-dir":
-                    # H ratio update (ADD pseudo-counts, cf. Alg.1 Eqs. 14-16)
+                    # H ratio update (additive pseudo-counts)
                     C = H * (W.T @ A) + (self.alpha - 1.0)
                     D = (1.0 - H) * (W.T @ B) + (self.beta - 1.0)
                     H = C / (C + D + self.eps)
 
-                    # ---- recompute with updated H (majorizer tightness)
-                    P = _clip01(W @ H, self.eps)
+                    # recompute with updated H
+                    P = W @ H
                     A, B = _compute_A_B(X, P, mask, self.eps)
 
-                    # W simplex step (Alg.1 Eq. 20); masked uses per-row counts
-                    numer = A @ H.T + B @ (1.0 - H).T  # MxK, nonnegative
+                    # W simplex step; masked uses per-row counts
+                    numer = A @ H.T + B @ (1.0 - H).T  # MxK
                     if mask is None:
-                        W_new = W * (numer / float(N))
+                        W_new = W * (numer / float(N))  # preserves row sums exactly
                     else:
                         row_counts = np.asarray(mask.sum(axis=1), dtype=float).reshape(-1, 1)
                         W_new = W.copy()
@@ -365,22 +350,22 @@ class NBMF:
                     if self.projection_method == "duchi":
                         W = _project_rows_to_simplex(W_new)
                     else:
-                        W = W_new  # paper-exact; no extra renorm
+                        W = W_new
 
                 else:  # dir-beta
-                    # W ratio update (ADD pseudo-counts)
+                    # W ratio update (additive pseudo-counts)
                     C = W * (A @ H.T) + (self.alpha - 1.0)
                     D = (1.0 - W) * (B @ (1.0 - H).T) + (self.beta - 1.0)
                     W = C / (C + D + self.eps)
 
-                    # ---- recompute with updated W
-                    P = _clip01(W @ H, self.eps)
+                    # recompute with updated W
+                    P = W @ H
                     A, B = _compute_A_B(X, P, mask, self.eps)
 
                     # H simplex step; masked uses per-column counts
                     numer = W.T @ A + (1.0 - W).T @ B  # KxN
                     if mask is None:
-                        H_new = H * (numer / float(M))
+                        H_new = H * (numer / float(M))  # preserves column sums exactly
                     else:
                         col_counts = np.asarray(mask.sum(axis=0), dtype=float).reshape(1, -1)
                         H_new = H.copy()
@@ -391,9 +376,9 @@ class NBMF:
                     if self.projection_method == "duchi":
                         H = _project_cols_to_simplex(H_new)
                     else:
-                        H = H_new  # paper-exact; no extra renorm
+                        H = H_new
 
-                # ---- objective trace (NLL − log prior up to constants)
+                # objective trace (NLL − log prior, up to consts); safe logs only here
                 P = _clip01(W @ H, self.eps)
                 nll = _bernoulli_nll(X, P, mask, average=False, eps=self.eps)
                 obj = nll - (_beta_log_prior(H, self.alpha, self.beta, self.eps)
@@ -406,7 +391,6 @@ class NBMF:
                     break
                 obj_prev = obj
 
-            # keep best init
             if obj < best_obj:
                 best_obj = obj
                 best_W = W
@@ -414,7 +398,6 @@ class NBMF:
                 best_hist = hist
                 self.n_iter_ = it
 
-        # store
         self.W_ = best_W
         self.components_ = best_H
         self.objective_history_ = best_hist
@@ -437,22 +420,35 @@ class NBMF:
         """Estimate W for new X with learned H fixed (common inference mode)."""
         if self.components_ is None:
             raise RuntimeError("Call fit() before transform().")
-        H = self.components_
 
+        # Accept SciPy sparse inputs at inference as well
+        try:
+            import scipy.sparse as sp  # type: ignore
+            if sp.issparse(X):
+                X = X.toarray()
+            if mask is not None and sp.issparse(mask):
+                mask = mask.toarray()
+        except Exception:
+            pass
+
+        H = self.components_
         X = np.asarray(X, dtype=float)
         M, N = X.shape
         K = H.shape[0]
         rng = np.random.default_rng(self.random_state)
 
         if self.orientation == "beta-dir":
-            W = _project_rows_to_simplex(rng.random((M, K)))
+            # strictly positive row-simplex init (no projection to avoid zeros)
+            W = rng.random((M, K))
+            W = W / W.sum(axis=1, keepdims=True)
         else:
             W = np.clip(rng.random((M, K)), 0.0, 1.0)
 
         obj_prev = np.inf
         for _ in range(1, max_iter + 1):
-            P = _clip01(W @ H, self.eps)
+            P = W @ H
             A, B = _compute_A_B(X, P, mask, self.eps)
+
             if self.orientation == "beta-dir":
                 numer = A @ H.T + B @ (1.0 - H).T
                 if mask is None:
@@ -472,7 +468,6 @@ class NBMF:
                 D = (1.0 - W) * (B @ (1.0 - H).T) + (self.beta - 1.0)
                 W = C / (C + D + self.eps)
 
-            # early stop based on NLL
             P = _clip01(W @ H, self.eps)
             obj = _bernoulli_nll(X, P, mask, average=False, eps=self.eps)
             if obj_prev < np.inf and (obj_prev - obj) / max(1.0, abs(obj_prev)) <= tol:
@@ -502,16 +497,18 @@ class NBMF:
     def _random_init(
         self, rng: np.random.Generator, M: int, N: int, K: int
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """Random initialization that respects the orientation’s constraints."""
+        """Random initialization that respects the orientation’s constraints and keeps values > 0."""
         if self.orientation == "beta-dir":
-            # W rows on simplex; H in (0,1)
+            # W: strictly positive rows normalized to 1 (no projection zeros)
             W = rng.random((M, K))
-            W = _project_rows_to_simplex(W)
+            W = W / W.sum(axis=1, keepdims=True)
+            # H: in (0,1)
             H = np.clip(rng.random((K, N)), 0.0, 1.0)
         elif self.orientation == "dir-beta":
-            # H columns on simplex; W in (0,1)
+            # H: strictly positive columns normalized to 1 (no projection zeros)
             H = rng.random((K, N))
-            H = _project_cols_to_simplex(H)
+            H = H / H.sum(axis=0, keepdims=True)
+            # W: in (0,1)
             W = np.clip(rng.random((M, K)), 0.0, 1.0)
         else:
             raise ValueError('orientation must be "beta-dir" or "dir-beta"')
