@@ -18,7 +18,7 @@ Array = np.ndarray
 
 
 def _clip01(X: Array, eps: float = 1e-12) -> Array:
-    # Only for numerically safe logs / final clipping — NOT used in A,B!
+    # Only for numerically safe logs / final clipping — NOT used in A,B or updates.
     return np.clip(X, a_min=eps, a_max=1.0 - eps)
 
 
@@ -81,10 +81,10 @@ def mm_update_H_beta_dir(
 ) -> Array:
     WH = W @ H
     A, B = _masked_ratios(Y, WH, mask, eps)
-    # Add pseudo-counts (not multiplied) — Algorithm 1
-    C = H * (W.T @ A) + (alpha - 1.0)
-    D = (1.0 - H) * (W.T @ B) + (beta - 1.0)
-    return _clip01(C / (C + D + eps), eps)
+    # Algorithm 1 (denominator independent of H):
+    numer = H * (W.T @ A) + (alpha - 1.0)
+    denom = (W.T @ (A + B)) + (alpha + beta - 2.0)
+    return numer / (denom + eps)
 
 
 def mm_update_W_beta_dir(
@@ -123,10 +123,10 @@ def mm_update_W_dir_beta(
 ) -> Array:
     WH = W @ H
     A, B = _masked_ratios(Y, WH, mask, eps)
-    # Add pseudo-counts (not multiplied)
-    C = W * (A @ H.T) + (alpha - 1.0)
-    D = (1.0 - W) * (B @ (1.0 - H).T) + (beta - 1.0)
-    return _clip01(C / (C + D + eps), eps)
+    # Algorithm 1 (denominator independent of W):
+    numer = W * (A @ H.T) + (alpha - 1.0)
+    denom = ((A + B) @ H.T) + (alpha + beta - 2.0)
+    return numer / (denom + eps)
 
 
 def mm_update_H_dir_beta(

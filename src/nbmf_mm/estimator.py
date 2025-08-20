@@ -1,8 +1,8 @@
 """
-NBMF -MM: Bernoulli (mean -parameterized) nonnegative binary matrix factorization
-solved by Majorization -Minimization (MM), with a scikit -learn -style API.
+NBMF-MM: Bernoulli (mean-parameterized) nonnegative binary matrix factorization
+solved by Majorization-Minimization (MM), with a scikit-learn-style API.
 
-This estimator implements the **mean -parameterized Bernoulli** model
+This estimator implements the **mean-parameterized Bernoulli** model
 :math:`Y_{mn} \\sim \\mathrm{Bernoulli}(\\theta_{mn})` with a *probability*
 matrix :math:`\\Theta = W H \\in (0,1)^{M\\times N}` and nonnegativity /
 simplex constraints on the factors. It follows the MM algorithm of
@@ -13,7 +13,8 @@ constraints and priors:
   rows of :math:`W` lie on the probability simplex
   (:math:`\\sum_k W_{mk}=1,\\;W_{mk}\\ge 0`); entries of :math:`H` are in
   :math:`(0,1)` with a Beta(:math:`\\alpha,\\beta`) prior.
-  In this orientation, **H** is updated by a ratio rule :math:`C/(C+D)`, and
+  In this orientation, **H** is updated by a ratio rule with denominator
+  :math:`W^T(A{+}B){+}\\alpha{+}\\beta{-}2` (independent of :math:`H`), and
   **W** is updated multiplicatively with the analytic **/N** normalizer that
   preserves the row simplex *without projection*.
 
@@ -21,37 +22,38 @@ constraints and priors:
   columns of :math:`H` lie on the probability simplex
   (:math:`\\sum_k H_{kn}=1,\\;H_{kn}\\ge 0`); entries of :math:`W` are in
   :math:`(0,1)` with a Beta(:math:`\\alpha,\\beta`) prior.
-  In this orientation, **W** uses the ratio rule and **H** uses the multiplicative
-  update with the analytic **/M** normalizer to preserve the column simplex.
+  In this orientation, **W** uses the ratio rule with denominator
+  :math:`(A{+}B)H^T{+}\\alpha{+}\\beta{-}2` (independent of :math:`W`), and
+  **H** uses the multiplicative update with the analytic **/M** normalizer to
+  preserve the column simplex.
 
 A **binary mask** can be supplied to perform masked training (matrix completion):
 only observed entries contribute to the likelihood and updates. In the simplex
-steps, the paper -exact **/N** (or **/M**) normalizer generalizes naturally by
+steps, the paper-exact **/N** (or **/M**) normalizer generalizes naturally by
 replacing :math:`N` (or :math:`M`) with the **number of observed entries per row
 (or per column)**, which maintains the simplex constraints under masking.
 
-The estimator logs the negative log -posterior (up to constants) over iterations in
+The estimator logs the negative log-posterior (up to constants) over iterations in
 ``objective_history_`` and exposes both a ``score`` (-NLL per observed entry;
 higher is better) and ``perplexity`` (:math:`\\exp` of the average NLL).
 
-**Projection choices for the simplex -constrained factor**
+**Projection choices for the simplex-constrained factor**
 
-- ``projection_method="normalize"`` (**default; paper -exact**): uses the closed -form
+- ``projection_method="normalize"`` (**default; paper-exact**): uses the closed-form
   **/N** (or **/M**) normalizer *inside* the multiplicative update, which
   preserves the simplex exactly in exact arithmetic and enjoys the classical
   MM monotonicity guarantee.
 
 - ``projection_method="duchi"``: applies a Euclidean projection to the
   probability simplex (Duchi et al., 2008) *after* the multiplicative step.
-  This is often fast and numerically near -identical to the ``"normalize"`` path
+  This is often fast and numerically near-identical to the ``"normalize"`` path
   (since the multiplicative step already lands on the simplex).
 
 **Notes**
 - Probabilities are **not clipped** during the **updates** (to maintain the
   MM identities). We only clip to :math:`[\\varepsilon, 1-\\varepsilon]`
   (default :math:`\\varepsilon=10^{-12}`) **when evaluating the likelihood**.
-- For the Beta prior, :math:`\\alpha,\\beta \\ge 1` are recommended; the
-  MM -based bounds and in -[0,1] preservation rely on this regime.
+- For the Beta prior, :math:`\\alpha,\\beta \\ge 1` are recommended.
 - Multiple random initializations (``n_init``) are supported; the best solution
   by final objective is retained.
 - Masking is applied consistently in the ratio terms
@@ -65,19 +67,19 @@ n_components : int
 
 orientation : {"dir-beta", "beta-dir"}, default="dir-beta"
     Which factor carries the simplex constraint and which carries the Beta
-    prior. Several case -insensitive aliases are accepted, e.g.
-    "Dir -Beta", "Aspect Bernoulli" → "dir -beta";
-    "Beta -Dir", "Binary ICA", "bICA" → "beta -dir".
+    prior. Several case-insensitive aliases are accepted, e.g.
+    "Dir-Beta", "Aspect Bernoulli" → "dir-beta";
+    "Beta-Dir", "Binary ICA", "bICA" → "beta-dir".
 
 alpha, beta : float, default=1.2
-    Shape parameters of the Beta prior placed on the *non -simplex* factor.
+    Shape parameters of the Beta prior placed on the *non-simplex* factor.
     Values :math:`\\ge 1` are recommended.
 
 max_iter : int, default=2000
     Maximum number of MM iterations per initialization.
 
 tol : float, default=1e-6
-    Relative objective -decrease tolerance for early stopping.
+    Relative objective-decrease tolerance for early stopping.
 
 random_state : int or None, default=None
     Seed for reproducible initialization.
@@ -86,9 +88,9 @@ n_init : int, default=1
     Number of random initializations. The best run by final objective is kept.
 
 projection_method : {"duchi", "normalize"}, default="normalize"
-    Strategy for enforcing the simplex constraint on the simplex -constrained
-    factor. ``"normalize"`` uses the **paper -exact** /N or /M normalizer;
-    ``"duchi"`` uses an ℓ₁ -simplex projection (Duchi et al., 2008).
+    Strategy for enforcing the simplex constraint on the simplex-constrained
+    factor. ``"normalize"`` uses the **paper-exact** /N or /M normalizer;
+    ``"duchi"`` uses an ℓ₁-simplex projection (Duchi et al., 2008).
 
 projection_backend : {"auto", "numpy", ...}, default="auto"
     Backend selector for the projection (placeholder; not used yet).
@@ -118,24 +120,24 @@ n_iter_ : int
     Number of iterations run for the selected (best) initialization.
 
 objective_history_ : list of float
-    Trace of the negative log -posterior (up to constants) across iterations.
+    Trace of the negative log-posterior (up to constants) across iterations.
 
 reconstruction_err_ : float
-    Average negative log -likelihood on the training data at convergence
+    Average negative log-likelihood on the training data at convergence
     (lower is better). Provided for reproducibility tests.
 
 References
 ----------
 - P. Magron and C. Févotte (2022).
-  *A majorization -minimization algorithm for nonnegative binary matrix
+  *A majorization-minimization algorithm for nonnegative binary matrix
   factorization.* IEEE Signal Processing Letters. (See also arXiv:2204.09741)
 
-- J. Duchi, S. Shalev -Shwartz, Y. Singer, and T. Chandra (2008).
-  *Efficient Projections onto the ℓ₁ -Ball for Learning in High Dimensions.*
+- J. Duchi, S. Shalev-Shwartz, Y. Singer, and T. Chandra (2008).
+  *Efficient Projections onto the ℓ₁-Ball for Learning in High Dimensions.*
   Proceedings of ICML.
 
 - A. Lumbreras, L. Filstroff, and C. Févotte (2020).
-  *Bayesian Mean -parameterized Nonnegative Binary Matrix Factorization.*
+  *Bayesian Mean-parameterized Nonnegative Binary Matrix Factorization.*
   Data Mining and Knowledge Discovery.
 """
 from __future__ import annotations
@@ -322,63 +324,63 @@ class NBMF:
             obj_prev = np.inf
 
             for it in range(1, self.max_iter + 1):
-                # ---- sub -step 1
-                P = W @ H  # raw P — do NOT clip here
+                # ---- sub-step 1 (build ratios from raw P; do NOT clip)
+                P = W @ H
                 A, B = _compute_A_B(X, P, mask, self.eps)
 
                 if self.orientation == "beta-dir":
-                    # H ratio update (additive pseudo-counts)
-                    C = H * (W.T @ A) + (self.alpha - 1.0)
-                    D = (1.0 - H) * (W.T @ B) + (self.beta - 1.0)
-                    H = C / (C + D + self.eps)
+                    # H ratio update (Alg. 1: denominator independent of H)
+                    numer = H * (W.T @ A) + (self.alpha - 1.0)
+                    denom = (W.T @ (A + B)) + (self.alpha + self.beta - 2.0)
+                    H = numer / (denom + self.eps)
 
-                    # recompute with updated H
+                    # ---- recompute with updated H (majorizer tightness)
                     P = W @ H
                     A, B = _compute_A_B(X, P, mask, self.eps)
 
-                    # W simplex step; masked uses per-row counts
-                    numer = A @ H.T + B @ (1.0 - H).T  # MxK
+                    # W simplex step (Alg.1); masked uses per-row counts
+                    numerW = A @ H.T + B @ (1.0 - H).T  # MxK, ≥0
                     if mask is None:
-                        W_new = W * (numer / float(N))  # preserves row sums exactly
+                        W_new = W * (numerW / float(N))
                     else:
                         row_counts = np.asarray(mask.sum(axis=1), dtype=float).reshape(-1, 1)
                         W_new = W.copy()
                         rows = (row_counts.squeeze() > 0)
                         if np.any(rows):
-                            W_new[rows] = W[rows] * (numer[rows] / row_counts[rows])
+                            W_new[rows] = W[rows] * (numerW[rows] / row_counts[rows])
 
                     if self.projection_method == "duchi":
                         W = _project_rows_to_simplex(W_new)
                     else:
-                        W = W_new
+                        W = W_new  # paper-exact; no extra renorm
 
                 else:  # dir-beta
-                    # W ratio update (additive pseudo-counts)
-                    C = W * (A @ H.T) + (self.alpha - 1.0)
-                    D = (1.0 - W) * (B @ (1.0 - H).T) + (self.beta - 1.0)
-                    W = C / (C + D + self.eps)
+                    # W ratio update (Alg. 1: denominator independent of W)
+                    numer = W * (A @ H.T) + (self.alpha - 1.0)
+                    denom = ((A + B) @ H.T) + (self.alpha + self.beta - 2.0)
+                    W = numer / (denom + self.eps)
 
-                    # recompute with updated W
+                    # ---- recompute with updated W
                     P = W @ H
                     A, B = _compute_A_B(X, P, mask, self.eps)
 
                     # H simplex step; masked uses per-column counts
-                    numer = W.T @ A + (1.0 - W).T @ B  # KxN
+                    numerH = W.T @ A + (1.0 - W).T @ B  # KxN
                     if mask is None:
-                        H_new = H * (numer / float(M))  # preserves column sums exactly
+                        H_new = H * (numerH / float(M))
                     else:
                         col_counts = np.asarray(mask.sum(axis=0), dtype=float).reshape(1, -1)
                         H_new = H.copy()
                         cols = (col_counts.squeeze() > 0)
                         if np.any(cols):
-                            H_new[:, cols] = H[:, cols] * (numer[:, cols] / col_counts[:, cols])
+                            H_new[:, cols] = H[:, cols] * (numerH[:, cols] / col_counts[:, cols])
 
                     if self.projection_method == "duchi":
                         H = _project_cols_to_simplex(H_new)
                     else:
-                        H = H_new
+                        H = H_new  # paper-exact; no extra renorm
 
-                # objective trace (NLL − log prior, up to consts); safe logs only here
+                # ---- objective trace (NLL − log prior up to constants)
                 P = _clip01(W @ H, self.eps)
                 nll = _bernoulli_nll(X, P, mask, average=False, eps=self.eps)
                 obj = nll - (_beta_log_prior(H, self.alpha, self.beta, self.eps)
@@ -391,6 +393,7 @@ class NBMF:
                     break
                 obj_prev = obj
 
+            # keep best init
             if obj < best_obj:
                 best_obj = obj
                 best_W = W
@@ -398,6 +401,7 @@ class NBMF:
                 best_hist = hist
                 self.n_iter_ = it
 
+        # store
         self.W_ = best_W
         self.components_ = best_H
         self.objective_history_ = best_hist
@@ -450,23 +454,23 @@ class NBMF:
             A, B = _compute_A_B(X, P, mask, self.eps)
 
             if self.orientation == "beta-dir":
-                numer = A @ H.T + B @ (1.0 - H).T
+                numerW = A @ H.T + B @ (1.0 - H).T
                 if mask is None:
-                    W_new = W * (numer / float(N))
+                    W_new = W * (numerW / float(N))
                 else:
                     row_counts = np.asarray(mask.sum(axis=1), dtype=float).reshape(-1, 1)
                     W_new = W.copy()
                     rows = (row_counts.squeeze() > 0)
                     if np.any(rows):
-                        W_new[rows] = W[rows] * (numer[rows] / row_counts[rows])
+                        W_new[rows] = W[rows] * (numerW[rows] / row_counts[rows])
                 if self.projection_method == "duchi":
                     W = _project_rows_to_simplex(W_new)
                 else:
                     W = W_new
             else:
-                C = W * (A @ H.T) + (self.alpha - 1.0)
-                D = (1.0 - W) * (B @ (1.0 - H).T) + (self.beta - 1.0)
-                W = C / (C + D + self.eps)
+                numer = W * (A @ H.T) + (self.alpha - 1.0)
+                denom = ((A + B) @ H.T) + (self.alpha + self.beta - 2.0)
+                W = numer / (denom + self.eps)
 
             P = _clip01(W @ H, self.eps)
             obj = _bernoulli_nll(X, P, mask, average=False, eps=self.eps)
