@@ -1,6 +1,8 @@
-# src/nbmf_mm/__init__.py
-from .estimator import NBMF
-from ._mm_exact import (
+# SPDX-License-Identifier: MIT
+# Re-export the public API surface expected by the tests.
+
+from .estimator import (
+    NBMF,
     bernoulli_nll,
     objective,
     mm_step_beta_dir,
