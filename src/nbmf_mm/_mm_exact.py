@@ -28,7 +28,9 @@ import numpy as np
 Array = np.ndarray
 
 def _clip01(X: Array, eps: float = 1e-12) -> Array:
-    return np.clip(X, eps, 1.0 - eps, out=np.empty_like(X), a_min=eps, a_max=1.0 - eps)
+    """Clip array to the open interval (eps, 1 - eps)."""
+    # Use *only* keyword args for a_min/a_max to avoid duplicate-arg TypeError.
+    return np.clip(X, a_min=eps, a_max=1.0 - eps)
 
 def _apply_mask(Y: Array, mask: Array | None) -> tuple[Array, Array, float]:
     """
