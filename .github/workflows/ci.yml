@@ -1,3 +1,4 @@
+# .github/workflows/ci.yml
 name: CI
 
 on:
@@ -20,26 +21,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Setup pixi without caching and without post-cleanup (avoids '.pixi' lstat)
-      - name: Set up pixi
+      # Disable cache until pixi.lock exists.
+      - name: Set up pixi (no cache until lockfile)
         uses: prefix-dev/setup-pixi@v0.8.1
         with:
-          cache: false          # don't require pixi.lock
-          post-cleanup: false   # don't try to delete a local .pixi dir
+          cache: false
 
       - name: Show versions
         run: |
           pixi --version
           pixi run python --version
 
-      # Install your package into the pixi environment so imports work
       - name: Install nbmf_mm (editable)
         run: |
           pixi run python -m pip install --no-deps -e .
-          # If you have test extras, you can use:
-          # pixi run python -m pip install --no-deps -e .[tests]
 
-      # Run tests; PYTHONPATH=src makes src-layout work even without install, as a belt & suspenders
       - name: Run pytest
         env:
           PYTHONPATH: src
