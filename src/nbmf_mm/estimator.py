@@ -1,25 +1,26 @@
+# SPDX-License-Identifier: BSD-3-Clause
 """
-NBMF-MM estimator: Bernoulli (mean-parameterized) NMF solved by MM.
+NBMF‑MM estimator: Bernoulli (mean‑parameterized) NMF solved by MM.
 
-Implements Algorithm 1 of Magron & Févotte (2022) with a scikit-learn-style API
+Implements Algorithm 1 of Magron & Févotte (2022) with a scikit‑learn‑style API
 and two symmetric orientations:
 
-- "beta-dir"  (Binary ICA):    W rows on the simplex; Beta prior on H (ratio step)
-- "dir-beta"  (Aspect Bernoulli): H columns on the simplex; Beta prior on W (ratio step)
+- "beta-dir"  (Binary ICA):           W rows on the simplex; Beta prior on H
+- "dir-beta"  (Aspect Bernoulli):     H columns on the simplex; Beta prior on W
 
-Projection choices for the simplex-constrained factor:
-- projection_method="normalize" (**default; theory-first**): multiplicative step
-  followed by exact L1 renormalization (paper-faithful; monotone objective).
-- projection_method="duchi": routed to the **same** paper-exact step for parity
-  (Euclidean projection would be a no-op anyway since we already land on the simplex).
+Projection for the simplex‑constrained factor:
+- projection_method="normalize" (**default; theory‑first**): multiplicative
+  step followed by exact L1 renormalization (paper‑faithful; monotone).
+- projection_method="duchi": routed to the same paper‑exact step for parity
+  (the MM step already lands on the simplex).
 
 References
 ----------
 - P. Magron and C. Févotte (2022).
-  “A majorization-minimization algorithm for nonnegative binary matrix
+  “A majorization–minimization algorithm for nonnegative binary matrix
    factorization.” IEEE SPL. (arXiv:2204.09741)
-- J. Duchi, S. Shalev-Shwartz, Y. Singer, T. Chandra (2008).
-  “Efficient Projections onto the ℓ₁-Ball for Learning in High Dimensions.”
+- J. Duchi, S. Shalev‑Shwartz, Y. Singer, T. Chandra (2008).
+  “Efficient Projections onto the ℓ₁‑Ball for Learning in High Dimensions.”
 """
 
 from __future__ import annotations
@@ -38,7 +39,6 @@ from ._mm_exact import (
     bernoulli_nll as _nll,
     _clip01,
 )
-
 
 _EPS = 1e-12
 
@@ -87,7 +87,7 @@ class NBMF:
     # ------------------ Public API ------------------
 
     def fit(self, X: np.ndarray, mask: Optional[np.ndarray] = None):
-        # Accept SciPy sparse inputs (converted to dense)
+        # Accept SciPy sparse (convert to dense)
         try:
             import scipy.sparse as sp  # type: ignore
             if sp.issparse(X):
@@ -129,13 +129,13 @@ class NBMF:
             it_done = 0
 
             for it in range(1, self.max_iter + 1):
-                # === Paper-exact one full MM step (normalize/duchi both route here) ===
+                # === Paper‑exact one full MM step (normalize/duchi both route here) ===
                 if self.orientation == "beta-dir":
                     W, H = mm_step_beta_dir(X, W, H, self.alpha, self.beta, mask, self.eps)
                 else:
                     W, H = mm_step_dir_beta(X, W, H, self.alpha, self.beta, mask, self.eps)
 
-                # Log MAP objective (NLL − log prior)
+                # Log MAP objective
                 obj = _objective(X, W, H, mask, self.orientation, self.alpha, self.beta, eps=self.eps)
                 hist.append(float(obj))
                 it_done = it
@@ -177,7 +177,7 @@ class NBMF:
         if self.components_ is None:
             raise RuntimeError("Call fit() before transform().")
 
-        # Accept SciPy sparse inputs at inference as well
+        # Accept SciPy sparse at inference
         try:
             import scipy.sparse as sp  # type: ignore
             if sp.issparse(X):
@@ -194,7 +194,7 @@ class NBMF:
         rng = np.random.default_rng(self.random_state)
 
         if self.orientation == "beta-dir":
-            # strictly positive row-simplex init
+            # strictly positive row‑simplex init
             W = rng.random((M, K))
             W = W / W.sum(axis=1, keepdims=True)
         else:
@@ -203,10 +203,8 @@ class NBMF:
         obj_prev = np.inf
         for _ in range(1, max_iter + 1):
             if self.orientation == "beta-dir":
-                # One multiplicative+renorm step with H fixed
                 W = mm_update_W_simplex_beta_dir(X, W, H, mask, self.eps)
             else:
-                # One Beta-regularized ratio step with H fixed
                 W = mm_update_W_dir_beta(X, W, H, self.alpha, self.beta, mask, self.eps)
 
             P = _clip01(W @ H, self.eps)
