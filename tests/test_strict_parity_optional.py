@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from nbmf_mm._mm_exact import mm_step_beta_dir
+from nbmf_mm import mm_step_beta_dir
 
 def _dirichlet_rows(rng, M, K):
     W = rng.gamma(shape=1.0, scale=1.0, size=(M, K))
@@ -36,11 +36,10 @@ def test_strict_one_step_parity_when_init_injection_supported():
         n_components=K,
         orientation="beta-dir",
         alpha=alpha, beta=beta,
-        random_state=0, n_init=1,
+        random_state=0,
         max_iter=1, tol=0.0,
-        projection_method="normalize",
         # These OPTIONAL kwargs are required for strict one-step parity:
-        init_W=W0, init_H=H0,
+        init='custom', W_init=W0, H_init=H0,
     ).fit(Y)
 
     # Compare factors and reconstruction after one iteration

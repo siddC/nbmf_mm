@@ -74,8 +74,7 @@ class NBMFMM(BaseEstimator, TransformerMixin):
     def __init__(self, n_components=10, alpha=1.2, beta=1.2,
                  max_iter=1000, tol=1e-5, init='random',
                  W_init=None, H_init=None, random_state=None, verbose=0,
-                 orientation="beta-dir", projection_method="normalize",
-                 use_numexpr=False, use_numba=False, projection_backend="numpy"):
+                 orientation="beta-dir"):
         self.n_components = n_components
         self.alpha = alpha
         self.beta = beta
@@ -103,11 +102,6 @@ class NBMFMM(BaseEstimator, TransformerMixin):
                 raise ValueError(f"Unknown orientation: {orientation}")
         else:
             self.orientation = orientation
-            
-        self.projection_method = projection_method
-        self.use_numexpr = use_numexpr
-        self.use_numba = use_numba
-        self.projection_backend = projection_backend
     
     def _initialize(self, X):
         """Initialize W and H matrices."""

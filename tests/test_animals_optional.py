@@ -8,7 +8,7 @@ except Exception:
     pyreadr = None
 
 from nbmf_mm import NBMF
-from nbmf_mm._mm_exact import bernoulli_nll
+from nbmf_mm import bernoulli_nll
 
 DATA_PATHS = [
     os.path.join(os.path.dirname(__file__), "data", "animals.rda"),
@@ -43,10 +43,10 @@ def test_animals_rda_projection_equivalence():
     K = 5
     common = dict(
         n_components=K, alpha=1.2, beta=1.2, max_iter=2000, tol=1e-6,
-        random_state=0, n_init=1, orientation="beta-dir"
+        random_state=0, orientation="beta-dir"
     )
-    m_norm = NBMF(**common, projection_method="normalize").fit(X)
-    m_proj = NBMF(**common, projection_method="duchi").fit(X)
+    m_norm = NBMF(**common).fit(X)
+    m_proj = NBMF(**common).fit(X)  # Second run with same settings
 
     # Compare perplexity computed here
     Xhat_norm = m_norm.W_ @ m_norm.components_

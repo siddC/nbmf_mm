@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from nbmf_mm import NBMF
-from nbmf_mm._mm_exact import (
+from nbmf_mm import (
     bernoulli_nll, objective,
     mm_step_beta_dir, mm_step_dir_beta,
 )
@@ -43,38 +43,7 @@ def test_monotone_objective_mm_helpers(orientation):
         assert obj <= obj_prev + 1e-10
         obj_prev = obj
 
-def test_projection_duchi_vs_normalize_near_equivalence(tiny_animals):
-    """
-    The *improvement* (Duchi simplex projection) must give nearly the same
-    likelihood/perplexity as the paper-exact normalizer ("normalize" path).
-    """
-    X = tiny_animals
-    K = 4
-    common = dict(
-        n_components=K, alpha=1.2, beta=1.2, max_iter=500, tol=1e-6,
-        random_state=0, n_init=1, orientation="beta-dir"
-    )
-    # Paper-exact (normalizer) baseline
-    m_norm = NBMF(**common, projection_method="normalize").fit(X)
-    # Fast projection alternative
-    m_proj = NBMF(**common, projection_method="duchi").fit(X)
-
-    # Reconstruct X (avoid relying on inverse_transform)
-    Xhat_norm = m_norm.W_ @ m_norm.components_
-    Xhat_proj = m_proj.W_ @ m_proj.components_
-
-    # Reconstruction closeness
-    rel_err = np.linalg.norm(Xhat_norm - Xhat_proj) / np.linalg.norm(Xhat_norm)
-    assert rel_err <= 1e-6
-
-    # Per-entry NLL / perplexity closeness (computed here for robustness)
-    nll_norm = bernoulli_nll(X, Xhat_norm)
-    nll_proj = bernoulli_nll(X, Xhat_proj)
-    assert abs(nll_norm - nll_proj) / max(1.0, abs(nll_norm)) <= 1e-6
-
-    perp_norm = np.exp(nll_norm / X.size)
-    perp_proj = np.exp(nll_proj / X.size)
-    assert abs(perp_norm - perp_proj) / perp_norm <= 1e-6
+# Removed test_projection_duchi_vs_normalize_near_equivalence - duchi projection removed for simplicity
 
 def test_orientation_swap_symmetry(tiny_animals):
     """
@@ -83,12 +52,12 @@ def test_orientation_swap_symmetry(tiny_animals):
     """
     X = tiny_animals
     K = 5
-    common = dict(alpha=1.2, beta=1.2, max_iter=500, tol=1e-6, random_state=0, n_init=1)
+    common = dict(alpha=1.2, beta=1.2, max_iter=500, tol=1e-6, random_state=0)
 
-    m_beta_dir = NBMF(n_components=K, orientation="beta-dir", projection_method="normalize", **common).fit(X)
+    m_beta_dir = NBMF(n_components=K, orientation="beta-dir", **common).fit(X)
     Xhat1 = m_beta_dir.W_ @ m_beta_dir.components_
 
-    m_dir_beta = NBMF(n_components=K, orientation="dir-beta", projection_method="normalize", **common).fit(X.T)
+    m_dir_beta = NBMF(n_components=K, orientation="dir-beta", **common).fit(X.T)
     # Reconstruct X via transposed orientation
     Xhat2 = (m_dir_beta.W_ @ m_dir_beta.components_).T
 

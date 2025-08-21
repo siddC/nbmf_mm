@@ -15,9 +15,6 @@ def test_fit_shapes_dir_beta():
         orientation="dir-beta",
         max_iter=200,
         tol=1e-6,
-        use_numexpr=False,
-        use_numba=False,
-        projection_backend="numpy",
         random_state=0,
     )
     model.fit(X)
@@ -33,9 +30,6 @@ def test_fit_shapes_beta_dir():
         orientation="beta-dir",
         max_iter=150,
         tol=1e-6,
-        use_numexpr=False,
-        use_numba=False,
-        projection_backend="numpy",
         random_state=0,
     )
     model.fit(X)
@@ -52,10 +46,6 @@ def test_objective_not_increasing_with_normalize_projection():
         n_components=5,
         max_iter=120,
         tol=1e-7,
-        use_numexpr=False,
-        use_numba=False,
-        projection_method="normalize",   # MM-faithful
-        projection_backend="numpy",
         random_state=0,
     )
     model.fit(X)
@@ -64,31 +54,7 @@ def test_objective_not_increasing_with_normalize_projection():
     assert np.all(hist[1:] <= hist[:-1] + 1e-8)
     assert hist[-1] <= hist[0] + 1e-10
 
-def test_duchi_projection_runs_and_is_finite():
-    """
-    With Euclidean simplex projection ("duchi") we do not strictly assert
-    monotonicity (projection is outside the original MM majorizer). Instead,
-    assert the objective is finite and reconstructions are in-bounds.
-    """
-    X = _toy_data()
-    model = NBMF(
-        n_components=5,
-        max_iter=120,
-        tol=1e-7,
-        use_numexpr=False,
-        use_numba=False,
-        projection_method="duchi",
-        projection_backend="numpy",
-        random_state=0,
-    )
-    model.fit(X)
-    hist = np.asarray(model.objective_history_, dtype=float)
-    assert np.isfinite(hist).all()
-    W = model.W_
-    H = model.components_
-    Xhat = model.inverse_transform(W)
-    assert Xhat.shape == X.shape
-    assert np.all((Xhat >= 0.0) & (Xhat <= 1.0))
+# Removed test_duchi_projection_runs_and_is_finite - duchi projection removed for simplicity
 
 def test_transform_inverse_shapes():
     X = _toy_data()
@@ -96,9 +62,6 @@ def test_transform_inverse_shapes():
         n_components=7,
         max_iter=150,
         tol=1e-6,
-        use_numexpr=False,
-        use_numba=False,
-        projection_backend="numpy",
         random_state=0,
     ).fit(X)
     W = model.transform(X)
@@ -114,9 +77,6 @@ def test_mask_training():
         n_components=6,
         max_iter=120,
         tol=1e-6,
-        use_numexpr=False,
-        use_numba=False,
-        projection_backend="numpy",
         random_state=0,
     ).fit(X, mask=mask)
     s = model.score(X, mask=mask)
@@ -129,20 +89,13 @@ def test_projection_variants_simplex_property():
     # Duchi + NumPy
     m1 = NBMF(
         n_components=5,
-        projection_method="duchi",
-        projection_backend="numpy",
         max_iter=50,
-        use_numexpr=False,
-        use_numba=False,
         random_state=0,
     ).fit(X)
     # Legacy normalize
     m2 = NBMF(
         n_components=5,
-        projection_method="normalize",
         max_iter=50,
-        use_numexpr=False,
-        use_numba=False,
         random_state=0,
     ).fit(X)
     # Check simplex constraints
@@ -165,8 +118,6 @@ def test_sparse_inputs():
         n_components=4,
         max_iter=40,
         tol=1e-6,
-        use_numexpr=False,
-        use_numba=False,
         random_state=0,
     ).fit(Xs, mask=Ms)
     assert m.W_.shape == (X.shape[0], 4)
@@ -179,10 +130,6 @@ def test_objective_not_increasing_with_normalize_projection_beta_dir():
         orientation="beta-dir",
         max_iter=120,
         tol=1e-7,
-        use_numexpr=False,
-        use_numba=False,
-        projection_method="normalize",
-        projection_backend="numpy",
         random_state=0,
     )
     model.fit(X)

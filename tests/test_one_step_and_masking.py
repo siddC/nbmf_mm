@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from nbmf_mm._mm_exact import mm_step_beta_dir, mm_step_dir_beta, objective
+from nbmf_mm import mm_step_beta_dir, mm_step_dir_beta, objective
 
 def _dirichlet_rows(rng, M, K):
     W = rng.gamma(shape=1.0, scale=1.0, size=(M, K))
