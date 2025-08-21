@@ -65,7 +65,7 @@ class NBMFMM(BaseEstimator, TransformerMixin):
     
     def __init__(self, n_components=10, alpha=1.2, beta=1.2,
                  max_iter=500, tol=1e-5, 
-                 W_init=None, H_init=None, random_state=None, verbose=0,
+                 W_init=None, H_init=None, init=None, random_state=None, verbose=0,
                  orientation="beta-dir"):
         self.n_components = n_components
         self.alpha = alpha
@@ -74,6 +74,7 @@ class NBMFMM(BaseEstimator, TransformerMixin):
         self.tol = tol
         self.W_init = W_init
         self.H_init = H_init
+        self.init = init  # For compatibility - currently unused
         self.random_state = random_state
         self.verbose = verbose
         # Orientation parameter kept for backward compatibility but ignored
@@ -86,13 +87,17 @@ class NBMFMM(BaseEstimator, TransformerMixin):
         # Validate input
         X = check_array(X, accept_sparse='csr', dtype=np.float64)
         
-        # Check if data is binary or in [0,1]
-        if not np.all((X >= 0) & (X <= 1)):
-            raise ValueError("X must be in [0,1]")
-            
-        # Handle sparse matrices
+        # Handle sparse matrices first
         if hasattr(X, 'toarray'):  # sparse matrix
             X = X.toarray()
+            
+        # Check if data is binary or in [0,1]
+        if not np.all((X >= 0) & (X <= 1)):
+            raise ValueError("X must be binary")
+        
+        # Normalize orientation parameter  
+        orientation_normalized = self._normalize_orientation(self.orientation)
+        self.orientation = orientation_normalized  # Store normalized form
             
         # Call the solver with paper-correct implementation
         W, H, losses, time_elapsed, n_iter = nbmf_mm_solver(
@@ -107,7 +112,7 @@ class NBMFMM(BaseEstimator, TransformerMixin):
             mask=mask,
             random_state=self.random_state,
             verbose=self.verbose,
-            orientation=self.orientation
+            orientation=orientation_normalized
         )
         
         # Store results
@@ -115,10 +120,32 @@ class NBMFMM(BaseEstimator, TransformerMixin):
         self.components_ = H  # Shape (n_components, n_features), format depends on orientation
         self.loss_curve_ = losses
         self.objective_history_ = losses  # Backward compatibility
+        self.loss_ = losses[-1] if losses else np.inf  # Current loss
         self.n_iter_ = n_iter
         self.reconstruction_err_ = losses[-1] if losses else np.inf
         
         return self
+    
+    def _normalize_orientation(self, orientation):
+        """Normalize orientation parameter to standard form."""
+        # Handle case-insensitive aliases
+        orientation_map = {
+            "beta-dir": "beta-dir",
+            "dir-beta": "dir-beta", 
+            "Beta-Dir": "beta-dir",
+            "Dir-Beta": "dir-beta",
+            "Dir Beta": "dir-beta",
+            "binary ICA": "beta-dir",
+            "Binary ICA": "beta-dir", 
+            "bICA": "beta-dir",
+            "Aspect Bernoulli": "dir-beta"
+        }
+        
+        if orientation in orientation_map:
+            return orientation_map[orientation]
+        else:
+            raise ValueError(f"Unknown orientation: {orientation}. "
+                           f"Must be one of {list(orientation_map.keys())}")
     
     def fit_transform(self, X, y=None):
         """
@@ -170,6 +197,10 @@ class NBMFMM(BaseEstimator, TransformerMixin):
             W_T = W_T / W_T.sum(axis=0, keepdims=True)
             W = W_T.T
             
+        # Ensure W stays in bounds
+        W = np.clip(W, 1e-8, 1.0)
+        # Re-normalize rows to sum to 1 after clipping
+        W = W / W.sum(axis=1, keepdims=True)
         return W
     
     def inverse_transform(self, W):
@@ -179,8 +210,64 @@ class NBMFMM(BaseEstimator, TransformerMixin):
         
         # Compute reconstruction
         # Note: W has rows summing to 1, H is in (0, 1)
-        return W @ self.components_  # Returns probabilities in (0, 1)
+        reconstruction = W @ self.components_
+        # Ensure reconstruction stays in [0, 1]
+        return np.clip(reconstruction, 0.0, 1.0)
     
+    def score(self, X, mask=None):
+        """
+        Compute the average log-likelihood per observed entry.
+        
+        Parameters
+        ----------
+        X : array-like, shape (n_samples, n_features)
+            Data matrix
+        mask : array-like, optional
+            Binary mask for observed entries
+            
+        Returns
+        -------
+        score : float
+            Average log-likelihood per observed entry
+        """
+        check_is_fitted(self, ['components_'])
+        X = check_array(X, accept_sparse='csr', dtype=np.float64)
+        
+        if hasattr(X, 'toarray'):  # sparse matrix
+            X = X.toarray()
+            
+        # Get reconstruction
+        X_recon = self.inverse_transform(self.transform(X))
+        
+        # Compute log-likelihood
+        eps = 1e-8
+        if mask is None:
+            log_lik = X * np.log(X_recon + eps) + (1 - X) * np.log(1 - X_recon + eps)
+            n_obs = X.size
+        else:
+            X_masked = X * mask
+            log_lik = X_masked * np.log(X_recon + eps) + (1 - X_masked) * np.log(1 - X_recon + eps)
+            n_obs = np.count_nonzero(mask)
+            
+        return np.sum(log_lik) / n_obs
+    
+    def perplexity(self, X, mask=None):
+        """
+        Compute perplexity of the model on X.
+        
+        Parameters
+        ----------
+        X : array-like, shape (n_samples, n_features)
+            Data matrix
+        mask : array-like, optional
+            Binary mask for observed entries
+            
+        Returns
+        -------
+        perplexity : float
+            Perplexity value
+        """
+        return np.exp(-self.score(X, mask))
 
 
 # Alias for backwards compatibility

@@ -5,28 +5,32 @@ from nbmf_mm._utils import generate_synthetic_binary_data
 
 class TestNBMFMM:
     
-    def test_binary_constraint(self):
-        """Test that H remains strictly binary throughout."""
+    def test_continuous_constraint(self):
+        """Test that H is continuous in [0,1] with Beta prior."""
         X, _, _ = generate_synthetic_binary_data(50, 30, 5, random_state=42)
         model = NBMFMM(n_components=5, max_iter=50, random_state=42)
         model.fit(X)
         
-        # Check H is binary
+        # Check H is continuous in [0,1]
         H = model.components_
-        assert np.all((H == 0) | (H == 1)), "H must be binary"
+        assert np.all((H >= 0) & (H <= 1)), "H must be in [0,1]"
+        # H should have many unique values (continuous, not binary)
+        h_unique = len(np.unique(H))
+        assert h_unique > 10, f"H should be continuous, got only {h_unique} unique values"
     
-    def test_nonnegative_constraint(self):
-        """Test that W remains non-negative."""
+    def test_simplex_constraint(self):
+        """Test that W rows sum to 1 (simplex constraint)."""
         X, _, _ = generate_synthetic_binary_data(50, 30, 5, random_state=42)
         model = NBMFMM(n_components=5, max_iter=50, random_state=42)
         model.fit(X)
         
-        # Check W is non-negative
+        # Check W has simplex rows (sum to 1)
         W = model.W_
         assert np.all(W >= 0), "W must be non-negative"
-        assert np.all(W <= 1), "W must be <= 1 for Beta prior validity"
+        row_sums = W.sum(axis=1)
+        np.testing.assert_allclose(row_sums, 1.0, rtol=1e-5, 
+                                 err_msg="W rows must sum to 1 (simplex constraint)")
     
-    @pytest.mark.skip(reason="MM algorithm implementation has monotonicity issues - requires mathematical review")
     def test_monotonic_convergence(self):
         """Test that NLL decreases monotonically (MM property)."""
         X, _, _ = generate_synthetic_binary_data(50, 30, 5, random_state=42)

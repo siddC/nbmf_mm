@@ -89,10 +89,10 @@ class TestPublicAPI:
         H1 = model1.components_
         W1 = model1.W_
         
-        # H should be binary (allowing for small numerical errors)
-        H1_rounded = np.round(H1)
-        assert np.allclose(H1, H1_rounded, atol=1e-8), "H must be binary for beta-dir"
-        assert np.all((H1_rounded == 0) | (H1_rounded == 1)), "H must be binary for beta-dir"
+        # H should be continuous in [0,1] with Beta prior
+        assert np.all((H1 >= 0) & (H1 <= 1)), "H must be in [0,1] for beta-dir"
+        h1_unique = len(np.unique(H1))
+        assert h1_unique > 10, f"H should be continuous for beta-dir, got {h1_unique} unique values"
         # W rows should sum to 1
         np.testing.assert_allclose(W1.sum(axis=1), 1.0, rtol=1e-5)
         
@@ -104,10 +104,10 @@ class TestPublicAPI:
         
         # H columns should sum to 1
         np.testing.assert_allclose(H2.sum(axis=0), 1.0, rtol=1e-5)
-        # W should be binary (allowing for small numerical errors)
-        W2_rounded = np.round(W2)
-        assert np.allclose(W2, W2_rounded, atol=1e-8), "W must be binary for dir-beta"
-        assert np.all((W2_rounded == 0) | (W2_rounded == 1)), "W must be binary for dir-beta"
+        # W should be continuous in [0,1] with Beta prior
+        assert np.all((W2 >= 0) & (W2 <= 1)), "W must be in [0,1] for dir-beta"
+        w2_unique = len(np.unique(W2))
+        assert w2_unique > 10, f"W should be continuous for dir-beta, got {w2_unique} unique values"
     
     def test_sparse_input(self):
         """Test sparse matrix input."""
@@ -153,21 +153,22 @@ class TestPublicAPI:
         model.fit(X)
         
         # With paper default (beta-dir):
-        # - H should be binary
-        # - W should be non-negative with simplex rows
+        # - H should be continuous in [0,1] with Beta prior
+        # - W should have rows that sum to 1 (simplex constraint)
         H = model.components_
         W = model.W_
         
-        # Check H is binary (allowing for small numerical errors)
-        H_rounded = np.round(H)
-        assert np.allclose(H, H_rounded, atol=1e-8), "H must be binary with default orientation"
-        assert np.all((H_rounded == 0) | (H_rounded == 1)), "H must be binary with default orientation"
+        # Check H is continuous in [0,1]
+        assert np.all((H >= 0) & (H <= 1)), "H must be in [0,1] with default orientation"
+        # H should have many unique values (continuous, not binary)
+        h_unique = len(np.unique(H))
+        assert h_unique > 10, f"H should be continuous, got only {h_unique} unique values"
         
         # Check W rows sum to 1 (simplex constraint)
         row_sums = W.sum(axis=1)
         np.testing.assert_allclose(row_sums, 1.0, rtol=1e-5)
         
-        print("✓ Default orientation matches paper")
+        print("PASS: Default orientation matches paper (H continuous, W rows simplex)")
 
 
 if __name__ == "__main__":

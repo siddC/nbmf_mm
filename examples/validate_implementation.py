@@ -35,9 +35,9 @@ def validate_monotonicity():
             print(f"  Violation at iteration {i}: {losses[i-1]:.10f} -> {losses[i]:.10f}")
     
     if violations == 0:
-        print("✅ Perfect monotonic convergence!!")
+        print("PASS: Perfect monotonic convergence!!")
     else:
-        print(f"❌ {violations} monotonicity violations found!!")
+        print(f"FAIL: {violations} monotonicity violations found!!")
     
     # Plot
     plt.figure(figsize=(10, 6))
@@ -67,10 +67,12 @@ def validate_constraints():
     H = model.components_
     W = model.W_
     
-    # Check H is binary
-    is_binary = np.all((H == 0) | (H == 1))
-    print(f"  H is binary: {is_binary}")
-    print(f"  H unique values: {np.unique(H)}")
+    # Check H is continuous in [0,1] 
+    h_in_bounds = np.all((H >= 0) & (H <= 1))
+    h_unique = len(np.unique(H))
+    is_continuous = h_unique > 10  # Should have many unique values
+    print(f"  H continuous in [0,1]: {h_in_bounds}")
+    print(f"  H unique values: {h_unique} (should be > 10)")
     
     # Check W rows sum to 1
     row_sums = W.sum(axis=1)
@@ -91,12 +93,14 @@ def validate_constraints():
     print(f"  H columns on simplex: {simplex_ok2}")
     print(f"  H column sums range: [{col_sums.min():.6f}, {col_sums.max():.6f}]")
     
-    # Check W is binary
-    is_binary2 = np.all((W2 == 0) | (W2 == 1))
-    print(f"  W is binary: {is_binary2}")
-    print(f"  W unique values: {np.unique(W2)}")
+    # Check W is continuous in [0,1]
+    w_in_bounds = np.all((W2 >= 0) & (W2 <= 1))
+    w_unique = len(np.unique(W2))
+    is_continuous2 = w_unique > 10  # Should have many unique values
+    print(f"  W continuous in [0,1]: {w_in_bounds}")
+    print(f"  W unique values: {w_unique} (should be > 10)")
     
-    return is_binary and simplex_ok and simplex_ok2 and is_binary2
+    return h_in_bounds and is_continuous and simplex_ok and simplex_ok2 and w_in_bounds and is_continuous2
 
 
 def main():
@@ -111,13 +115,13 @@ def main():
     print("\n" + "="*60)
     print("VALIDATION SUMMARY")
     print("="*60)
-    print(f"Monotonic Convergence: {'✅ PASS' if mono_ok else '❌ FAIL'}")
-    print(f"Constraint Satisfaction: {'✅ PASS' if const_ok else '❌ FAIL'}")
+    print(f"Monotonic Convergence: {'PASS' if mono_ok else 'FAIL'}")
+    print(f"Constraint Satisfaction: {'PASS' if const_ok else 'FAIL'}")
     
     if mono_ok and const_ok:
-        print("\n🎉 All validations passed! Implementation is correct.")
+        print("\nSUCCESS: All validations passed! Implementation is correct.")
     else:
-        print("\n⚠️ Some validations failed. Check implementation.")
+        print("\nWARNING: Some validations failed. Check implementation.")
 
 
 if __name__ == "__main__":

@@ -10,12 +10,12 @@ solver, following **Magron & Févotte (2022)**. It exposes a scikit‑learn‑st
 API and two symmetric orientations:
 
 - **`orientation="beta-dir"` (default; Original Paper Setting)**  
-  **H** is binary {0,1}; **W** is non-negative with rows on simplex  
+  **W** rows sum to 1 (simplex constraint); **H** is continuous in [0,1] with Beta prior  
   This matches Magron & Févotte (2022)
 
-- **`orientation="dir-beta"` (Alternative)**  
-  **H** has columns on simplex; **W** is binary {0,1}  
-  This is the symmetric formulation
+- **`orientation="dir-beta"` (Symmetric Alternative)**  
+  **W** is continuous in [0,1] with Beta prior; **H** columns sum to 1 (simplex constraint)  
+  Mathematically equivalent to `"beta-dir"` on `V.T`
 
 **Projection choices** for the simplex‑constrained factor:
 
@@ -95,13 +95,27 @@ model = NBMF(n_components=6, orientation="beta-dir",
 
 ---
 
+## Mathematical Formulations
+
+Both orientations solve the Bernoulli likelihood: `V ~ Bernoulli(sigmoid(W @ H))`
+
+### Orientation: `beta-dir` (Matches paper's primary formulation)
+- **W**: Rows lie on probability simplex (sum to 1)
+- **H**: Continuous in [0,1] with Beta(α, β) prior
+- Use this to reproduce paper experiments
+
+### Orientation: `dir-beta` (Symmetric formulation)
+- **W**: Continuous in [0,1] with Beta(α, β) prior  
+- **H**: Columns lie on probability simplex (sum to 1)
+- Mathematically equivalent to `beta-dir` on `V.T`
+
 ## Why two orientations?
 
-- dir-beta (Aspect Bernoulli) — H columns are on the simplex → each feature (e.g., gene) has interpretable mixture memberships across latent aspects. W carries sample‑specific propensities with a Beta prior.
+Different interpretability needs:
+- **beta-dir**: W rows are mixture weights over latent factors; H captures factor-feature associations
+- **dir-beta**: H columns are mixture weights over latent aspects; W captures sample-aspect propensities
 
-- beta-dir (Binary ICA) — W rows are on the simplex; H is Beta‑constrained.
-
-Both solve the same Bernoulli mean‑parameterized factorization with different geometric constraints; pick the one that best matches your interpretability needs.
+Both solve the same mean-parameterized factorization with symmetric geometric constraints.
 
 ---
 
@@ -136,10 +150,10 @@ To reproduce the results from the original paper, use these settings:
 ```python
 from nbmf_mm import NBMF
 
-# Paper setting: H binary, W non-negative with simplex rows
+# Use beta-dir to match paper exactly
 model = NBMF(
     n_components=10,
-    orientation="beta-dir",  # THIS IS CRITICAL!
+    orientation="beta-dir",
     alpha=1.2,
     beta=1.2,
     max_iter=500,
@@ -147,8 +161,7 @@ model = NBMF(
 )
 model.fit(X)
 
-# H will be binary {0,1}
-# W will have rows that sum to 1
+# W rows will sum to 1, H will be continuous
 ```
 
 Run the reproduction scripts:
