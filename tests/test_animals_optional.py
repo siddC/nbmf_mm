@@ -8,7 +8,6 @@ except Exception:
     pyreadr = None
 
 from nbmf_mm import NBMF
-from nbmf_mm import bernoulli_nll
 
 DATA_PATHS = [
     os.path.join(os.path.dirname(__file__), "data", "animals.rda"),
@@ -48,12 +47,15 @@ def test_animals_rda_projection_equivalence():
     m_norm = NBMF(**common).fit(X)
     m_proj = NBMF(**common).fit(X)  # Second run with same settings
 
-    # Compare perplexity computed here
-    Xhat_norm = m_norm.W_ @ m_norm.components_
-    Xhat_proj = m_proj.W_ @ m_proj.components_
+    # Compare reconstructions - both should be identical due to same random state
+    Xhat_norm = m_norm.inverse_transform(m_norm.W_)
+    Xhat_proj = m_proj.inverse_transform(m_proj.W_)
 
-    nll_norm = bernoulli_nll(X, Xhat_norm)
-    nll_proj = bernoulli_nll(X, Xhat_proj)
+    # Compute Bernoulli negative log-likelihood manually
+    eps = 1e-10
+    nll_norm = -np.sum(X * np.log(Xhat_norm + eps) + (1 - X) * np.log(1 - Xhat_norm + eps))
+    nll_proj = -np.sum(X * np.log(Xhat_proj + eps) + (1 - X) * np.log(1 - Xhat_proj + eps))
+    
     perp_norm = np.exp(nll_norm / X.size)
     perp_proj = np.exp(nll_proj / X.size)
 
