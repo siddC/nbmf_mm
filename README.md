@@ -9,13 +9,11 @@
 solver, following **Magron & Févotte (2022)**. It exposes a scikit‑learn‑style
 API and two symmetric orientations:
 
-- **`orientation="dir-beta"` (Aspect Bernoulli; default)**  
-  Columns of **H** lie on the probability simplex (sum‑to‑1); **W** has a
-  Beta\((\alpha,\beta)\) prior.
+- **`orientation="beta-dir"` (Binary ICA / bICA; default)**  
+  **H** has Beta prior (binary); rows of **W** lie on the probability simplex (Dirichlet prior).
 
-- **`orientation="beta-dir"` (Binary ICA / bICA)**  
-  Rows of **W** lie on the probability simplex; **H** has a
-  Beta\((\alpha,\beta)\) prior.
+- **`orientation="dir-beta"` (Aspect Bernoulli)**  
+  **H** has Dirichlet prior (columns sum‑to‑1); **W** has Beta prior (binary).
 
 **Projection choices** for the simplex‑constrained factor:
 

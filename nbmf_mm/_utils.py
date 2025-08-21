@@ -2,6 +2,8 @@ import numpy as np
 
 def check_is_fitted(estimator, attributes):
     """Check if estimator is fitted by verifying attributes exist."""
+    if isinstance(attributes, str):
+        attributes = [attributes]
     for attr in attributes:
         if not hasattr(estimator, attr):
             raise ValueError(f"This {type(estimator).__name__} instance is not fitted yet.")

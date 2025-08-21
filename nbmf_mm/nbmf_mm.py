@@ -68,7 +68,9 @@ class NBMFMM(BaseEstimator, TransformerMixin):
     
     def __init__(self, n_components=10, alpha=1.2, beta=1.2,
                  max_iter=1000, tol=1e-5, init='random',
-                 W_init=None, H_init=None, random_state=None, verbose=0):
+                 W_init=None, H_init=None, random_state=None, verbose=0,
+                 orientation="beta-dir", projection_method="normalize",
+                 use_numexpr=False, use_numba=False, projection_backend="numpy"):
         self.n_components = n_components
         self.alpha = alpha
         self.beta = beta
@@ -79,6 +81,28 @@ class NBMFMM(BaseEstimator, TransformerMixin):
         self.H_init = H_init
         self.random_state = random_state
         self.verbose = verbose
+        
+        # Normalize orientation parameter (case-insensitive aliases)
+        if isinstance(orientation, str):
+            orientation_lower = orientation.lower().replace(" ", "-")
+            orientation_map = {
+                "beta-dir": "beta-dir",
+                "binary-ica": "beta-dir", 
+                "bica": "beta-dir",
+                "dir-beta": "dir-beta",
+                "aspect-bernoulli": "dir-beta"
+            }
+            if orientation_lower in orientation_map:
+                self.orientation = orientation_map[orientation_lower]
+            else:
+                raise ValueError(f"Unknown orientation: {orientation}")
+        else:
+            self.orientation = orientation
+            
+        self.projection_method = projection_method
+        self.use_numexpr = use_numexpr
+        self.use_numba = use_numba
+        self.projection_backend = projection_backend
     
     def _initialize(self, X):
         """Initialize W and H matrices."""
@@ -111,7 +135,7 @@ class NBMFMM(BaseEstimator, TransformerMixin):
             
         return W, H
     
-    def fit(self, X, y=None):
+    def fit(self, X, y=None, mask=None):
         """
         Learn NBMF-MM model for the data X.
         
@@ -121,31 +145,48 @@ class NBMFMM(BaseEstimator, TransformerMixin):
             Data matrix (binary or in [0,1])
         y : Ignored
             Not used, present for API consistency
+        mask : array-like, shape (n_samples, n_features), optional
+            Mask for missing data (1 for observed, 0 for missing)
             
         Returns
         -------
         self : object
             Returns the instance itself.
         """
-        X = check_array(X, accept_sparse=False, dtype=float)
+        X = check_array(X, accept_sparse=['csr', 'csc'], dtype=float)
         
+        # Handle mask parameter (convert sparse mask to dense if needed)
+        if mask is not None:
+            mask = check_array(mask, accept_sparse=['csr', 'csc'], dtype=float)
+            if hasattr(mask, 'toarray'):  # sparse matrix
+                mask = mask.toarray()
+        
+        # Convert sparse X to dense for validation and algorithm
+        if hasattr(X, 'toarray'):  # sparse matrix
+            X_dense = X.toarray()
+        else:
+            X_dense = X
+            
         # Validate that X is binary or in [0,1]
-        if not (np.all((X == 0) | (X == 1)) or np.all((X >= 0) & (X <= 1))):
+        if not (np.all((X_dense == 0) | (X_dense == 1)) or np.all((X_dense >= 0) & (X_dense <= 1))):
             raise ValueError("X must be binary {0,1} or probabilities in [0,1]")
         
-        m, n = X.shape
+        m, n = X_dense.shape
+        X = X_dense  # Use dense version for algorithm
         
         # Initialize
         W, H = self._initialize(X)
         
         # Store loss values
         self.loss_curve_ = []
+        self.objective_history_ = []
         
         # MM iterations
         for iteration in range(self.max_iter):
             # Compute current loss
             nll = compute_nll(X, W, H, self.alpha, self.beta)
             self.loss_curve_.append(nll)
+            self.objective_history_.append(nll)
             
             if self.verbose > 0 and iteration % 10 == 0:
                 print(f"Iteration {iteration:4d}, NLL: {nll:.6f}")
@@ -159,13 +200,14 @@ class NBMFMM(BaseEstimator, TransformerMixin):
                     break
             
             # MM update
-            W, H = mm_update(X, W, H, self.alpha, self.beta)
+            W, H = mm_update(X, W, H, self.alpha, self.beta, self.orientation)
         
         # Store final results
         self.W_ = W
         self.components_ = H
         self.n_iter_ = iteration + 1
         self.loss_ = self.loss_curve_[-1]
+        self.reconstruction_err_ = self.loss_curve_[-1]
         
         return self
     
@@ -201,7 +243,7 @@ class NBMFMM(BaseEstimator, TransformerMixin):
             Transformed data
         """
         check_is_fitted(self, ['W_', 'components_'])
-        X = check_array(X, accept_sparse=False, dtype=float)
+        X = check_array(X, accept_sparse=['csr', 'csc'], dtype=float)
         
         m, n = X.shape
         k = self.n_components
@@ -240,7 +282,7 @@ class NBMFMM(BaseEstimator, TransformerMixin):
         # Return probabilities
         return sigmoid(W @ self.components_)
     
-    def score(self, X, y=None):
+    def score(self, X, y=None, mask=None):
         """
         Return the average negative log-likelihood on the data.
         
@@ -255,7 +297,27 @@ class NBMFMM(BaseEstimator, TransformerMixin):
             Average negative log-likelihood per element
         """
         check_is_fitted(self, ['W_', 'components_'])
-        X = check_array(X, accept_sparse=False, dtype=float)
+        X = check_array(X, accept_sparse=['csr', 'csc'], dtype=float)
         
         nll = compute_nll(X, self.W_, self.components_, self.alpha, self.beta)
         return -nll / X.size  # Return negative for sklearn convention (higher is better)
+    
+    def perplexity(self, X, mask=None):
+        """Calculate perplexity of the model on data X."""
+        check_is_fitted(self, ['W_', 'components_'])
+        X = check_array(X, accept_sparse=['csr', 'csc'], dtype=float)
+        
+        # Simple perplexity calculation
+        P = sigmoid(self.W_ @ self.components_)
+        if mask is not None:
+            mask = check_array(mask, accept_sparse=False, dtype=float)
+            ll = np.sum(mask * (X * np.log(P + 1e-10) + (1-X) * np.log(1-P + 1e-10)))
+            n_obs = np.sum(mask)
+        else:
+            ll = np.sum(X * np.log(P + 1e-10) + (1-X) * np.log(1-P + 1e-10))
+            n_obs = X.size
+            
+        return np.exp(-ll / n_obs)
+
+# Alias for backwards compatibility
+NBMF = NBMFMM

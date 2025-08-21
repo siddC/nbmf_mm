@@ -1,0 +1,4 @@
+Dataset,Best k,Train Perplexity,Val Perplexity,Test Perplexity,Iterations,Time (s)
+Animals,5,1.890,3.276,3.275,3,0.011
+Lastfm,10,1.880,3.258,3.258,3,0.057
+Paleo,5,1.850,3.207,3.207,3,0.040
