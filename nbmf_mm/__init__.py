@@ -6,7 +6,11 @@ P. Magron and C. Févotte, "A majorization-minimization algorithm for
 nonnegative binary matrix factorization," IEEE Signal Processing Letters, 2022.
 """
 
-from .nbmf_mm import NBMFMM, NBMF
+from ._base import NBMFMM, NBMF
 
-__version__ = '0.2.0'
+try:
+    from ._version import __version__
+except ImportError:
+    __version__ = "0.0.0+unknown"
+
 __all__ = ['NBMFMM', 'NBMF']

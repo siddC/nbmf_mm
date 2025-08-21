@@ -4,15 +4,12 @@ Reproduce experiments from Magron & Févotte (2022) using nbmf_mm.
 Results are saved to outputs/chauhan2025/
 """
 import os
-import sys
 import numpy as np
 import pandas as pd
 import pickle
 import time
 from pathlib import Path
 
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
 from nbmf_mm import NBMF
 
 # Setup paths
@@ -87,10 +84,10 @@ def run_experiment(dataset_name, n_components_list, alpha=1.2, beta=1.2):
     for k in n_components_list:
         print(f"\n--- n_components = {k} ---")
         
-        # Train model
+        # CRITICAL: Use the correct orientation for paper reproduction
         model = NBMF(
             n_components=k,
-            orientation="beta-dir",  # Paper setting: H binary, W simplex
+            orientation="beta-dir",  # MUST be beta-dir for paper setting!
             alpha=alpha,
             beta=beta,
             max_iter=500,

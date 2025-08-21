@@ -9,11 +9,13 @@
 solver, following **Magron & Févotte (2022)**. It exposes a scikit‑learn‑style
 API and two symmetric orientations:
 
-- **`orientation="beta-dir"` (Binary ICA / bICA; default)**  
-  **H** has Beta prior (binary); rows of **W** lie on the probability simplex (Dirichlet prior).
+- **`orientation="beta-dir"` (default; Original Paper Setting)**  
+  **H** is binary {0,1}; **W** is non-negative with rows on simplex  
+  This matches Magron & Févotte (2022)
 
-- **`orientation="dir-beta"` (Aspect Bernoulli)**  
-  **H** has Dirichlet prior (columns sum‑to‑1); **W** has Beta prior (binary).
+- **`orientation="dir-beta"` (Alternative)**  
+  **H** has columns on simplex; **W** is binary {0,1}  
+  This is the symmetric formulation
 
 **Projection choices** for the simplex‑constrained factor:
 
@@ -66,8 +68,8 @@ rng = np.random.default_rng(0)
 X = (rng.random((100, 500)) < 0.25).astype(float)   # binary {0,1} or probabilities in [0,1]
 
 # Theory-first default: monotone MM with paper-exact normalizer
-model = NBMF(n_components=6, orientation="dir-beta",
-             alpha=1.2, beta=1.2, random_state=0).fit(Y)
+model = NBMF(n_components=6, orientation="beta-dir",
+             alpha=1.2, beta=1.2, random_state=0).fit(X)
 
 W = model.W_                 # shape (n_samples, n_components)
 H = model.components_        # shape (n_components, n_features)
@@ -87,8 +89,8 @@ print("perplexity:", model.perplexity(X, mask=mask))
 
 To use the fast projection alternative:
 ```python
-model = NBMF(n_components=6, orientation="dir-beta",
-             projection_method="duchi", random_state=0).fit(Y)
+model = NBMF(n_components=6, orientation="beta-dir",
+             projection_method="duchi", random_state=0).fit(X)
 ```
 
 ---
@@ -107,7 +109,7 @@ Both solve the same Bernoulli mean‑parameterized factorization with different 
 
 NBMF(
   n_components: int,
-  orientation: {"dir-beta","beta-dir"} = "dir-beta",
+  orientation: {"dir-beta","beta-dir"} = "beta-dir",
   alpha: float = 1.2,
   beta: float = 1.2,
   projection_method: {"normalize","duchi"} = "normalize",
@@ -126,6 +128,36 @@ NBMF(
 ## Reproducibility
 - Set `random_state` (int) for reproducible initialization.
 - Use `n_init > 1` to run several random restarts and keep the best NLL.
+
+## Reproducing Magron & Févotte (2022)
+
+To reproduce the results from the original paper, use these settings:
+
+```python
+from nbmf_mm import NBMF
+
+# Paper setting: H binary, W non-negative with simplex rows
+model = NBMF(
+    n_components=10,
+    orientation="beta-dir",  # THIS IS CRITICAL!
+    alpha=1.2,
+    beta=1.2,
+    max_iter=500,
+    tol=1e-5
+)
+model.fit(X)
+
+# H will be binary {0,1}
+# W will have rows that sum to 1
+```
+
+Run the reproduction scripts:
+
+```bash
+python examples/reproduce_magron2022.py
+python examples/display_figures.py
+```
+
 ---
 
 ## References

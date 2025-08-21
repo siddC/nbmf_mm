@@ -48,6 +48,11 @@ class NBMFMM(BaseEstimator, TransformerMixin):
     verbose : int, default=0
         Verbosity level
         
+    orientation : str, default='beta-dir'
+        Orientation of the factorization:
+        - 'beta-dir': H binary, W simplex rows (matches paper)
+        - 'dir-beta': H simplex columns, W binary
+        
     Attributes
     ----------
     W_ : array-like, shape (n_samples, n_components)
@@ -318,6 +323,7 @@ class NBMFMM(BaseEstimator, TransformerMixin):
             n_obs = X.size
             
         return np.exp(-ll / n_obs)
+
 
 # Alias for backwards compatibility
 NBMF = NBMFMM
