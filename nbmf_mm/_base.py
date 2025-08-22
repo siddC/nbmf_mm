@@ -12,21 +12,18 @@ class NBMFMM(BaseEstimator, TransformerMixin):
     P. Magron and C. Févotte, "A majorization-minimization algorithm for
     nonnegative binary matrix factorization," IEEE Signal Processing Letters, 2022.
     
-    IMPORTANT: Despite the name "binary", the factor H is continuous in [0,1]
-    during optimization. The "binary" refers to the input data Y.
-    
     Parameters
     ----------
     n_components : int, default=10
         Number of components (latent dimension k)
         
     alpha : float, default=1.2
-        Beta prior parameter for H.
+        Alpha prior parameter for H.
         
     beta : float, default=1.2
         Beta prior parameter for H.
         
-    max_iter : int, default=500
+    max_iter : int, default=2000
         Maximum number of iterations
         
     tol : float, default=1e-5
@@ -64,7 +61,7 @@ class NBMFMM(BaseEstimator, TransformerMixin):
     """
     
     def __init__(self, n_components=10, alpha=1.2, beta=1.2,
-                 max_iter=500, tol=1e-5, 
+                 max_iter=2000, tol=1e-5, 
                  W_init=None, H_init=None, init=None, random_state=None, verbose=0,
                  orientation="beta-dir"):
         self.n_components = n_components
@@ -77,8 +74,6 @@ class NBMFMM(BaseEstimator, TransformerMixin):
         self.init = init  # For compatibility - currently unused
         self.random_state = random_state
         self.verbose = verbose
-        # Orientation parameter kept for backward compatibility but ignored
-        # Our implementation always follows the paper's beta-dir approach
         self.orientation = orientation
     
     
