@@ -4,7 +4,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/nbmf-mm.svg)](https://pypi.org/project/nbmf-mm/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.md)
 
-**nbmf‑mm** implements *mean‑parameterized* Bernoulli matrix factorization
+**nbmf‑mm** implements a Bernoulli *mean‑parameterized* non-negative (binary) matrix factorization
 \(\Theta = W H \in (0,1)^{M\times N}\) with a **Majorization–Minimization (MM)**
 solver, following **Magron & Févotte (2022)**. It exposes a scikit‑learn‑style
 API and two symmetric orientations:
@@ -116,6 +116,23 @@ Different interpretability needs:
 - **dir-beta**: H columns are mixture weights over latent aspects; W captures sample-aspect propensities
 
 Both solve the same mean-parameterized factorization with symmetric geometric constraints.
+
+### Masking semantics and legacy parity
+
+By default, only **observed entries** contribute to both the `y` and `(1 - y)` terms of the Bernoulli likelihood, and
+the simplex step divides by the **number of observed entries** (per row/column) so the simplex is preserved under masking.
+This is the paper-correct masked MM.
+
+Some research scripts for NBMF-MM pre-mask `Y` and then use `(1 - Y)` **without** reapplying the mask during the **H**
+update. This effectively treats **missing entries as negatives** in the `(1 - y)` term. They also divide the **W** update
+by the global number of features `n` even under masking. We expose both behaviors via two toggles:
+
+```python
+NBMFMM(
+    ...,
+    mask_policy="observed-only",          # default (paper-correct)
+    simplex_normalizer="observed-count",   # default (paper-correct)
+)
 
 ---
 
