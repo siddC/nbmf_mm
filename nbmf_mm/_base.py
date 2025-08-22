@@ -1,58 +1,72 @@
-# nbmf_mm/_base.py
-from typing import Optional
-
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.utils import check_array
-
-from ._solver import nbmf_mm_solver, nbmf_mm_update_beta_dir, _validate_toggles
-
+from sklearn.utils import check_random_state, check_array
+from ._solver import nbmf_mm_solver
+from ._utils import check_is_fitted
 
 class NBMFMM(BaseEstimator, TransformerMixin):
     """
     Non-negative Binary Matrix Factorization via Majorization-Minimization.
-
+    
+    Implements the NBMF-MM algorithm from:
+    P. Magron and C. Févotte, "A majorization-minimization algorithm for
+    nonnegative binary matrix factorization," IEEE Signal Processing Letters, 2022.
+    
+    IMPORTANT: Despite the name "binary", the factor H is continuous in [0,1]
+    during optimization. The "binary" refers to the input data Y.
+    
     Parameters
     ----------
-    n_components : int
-    alpha, beta : float
+    n_components : int, default=10
+        Number of components (latent dimension k)
+        
+    alpha : float, default=1.2
+        Beta prior parameter for H.
+        
+    beta : float, default=1.2
+        Beta prior parameter for H.
+        
     max_iter : int, default=500
+        Maximum number of iterations
+        
     tol : float, default=1e-5
-    random_state : int or None
+        Tolerance for convergence based on relative change in loss
+        
+    W_init : array-like, shape (n_samples, n_components), optional
+        Initial W matrix
+        
+    H_init : array-like, shape (n_components, n_features), optional
+        Initial H matrix
+        
+    random_state : int, RandomState instance or None, default=None
+        Random state for initialization
+        
     verbose : int, default=0
-    orientation : {"beta-dir","dir-beta"}, default="beta-dir"
-    projection_method : {"normalize","duchi"}, default="normalize"
-    mask_policy : {"observed-only","magron2022-legacy"}, default="observed-only"
-        H-update masking semantics. See README.
-    simplex_normalizer : {"observed-count","magron2022-legacy"}, default="observed-count"
-        W-step normalizer under masking. See README.
-
-    The following kwargs are accepted for API compatibility but are no-ops:
-      - use_numexpr, use_numba, projection_backend, init, W_init, H_init, n_init
+        Verbosity level
+        
+    orientation : str, default="beta-dir"
+        - "beta-dir": H continuous in [0,1], W rows sum to 1 (simplex)
+        - "dir-beta": W continuous in [0,1], H columns sum to 1 (simplex)
+        
+    Attributes
+    ----------
+    W_ : array-like, shape (n_samples, n_components)
+        Factor matrix - continuous or simplex depending on orientation
+        
+    components_ : array-like, shape (n_components, n_features)  
+        Factor matrix - continuous or simplex depending on orientation
+        
+    n_iter_ : int
+        Actual number of iterations
+        
+    loss_curve_ : list
+        Loss values per iteration
     """
-
-    def __init__(
-        self,
-        n_components: int = 10,
-        alpha: float = 1.2,
-        beta: float = 1.2,
-        max_iter: int = 500,
-        tol: float = 1e-5,
-        W_init: Optional[np.ndarray] = None,
-        H_init: Optional[np.ndarray] = None,
-        init: Optional[str] = None,
-        random_state: Optional[int] = None,
-        verbose: int = 0,
-        orientation: str = "beta-dir",
-        projection_method: str = "normalize",
-        mask_policy: str = "observed-only",
-        simplex_normalizer: str = "observed-count",
-        n_init: int = 1,
-        # accepted but unused
-        use_numexpr: bool = False,
-        use_numba: bool = False,
-        projection_backend: str = "auto",
-    ):
+    
+    def __init__(self, n_components=10, alpha=1.2, beta=1.2,
+                 max_iter=500, tol=1e-5, 
+                 W_init=None, H_init=None, init=None, random_state=None, verbose=0,
+                 orientation="beta-dir"):
         self.n_components = n_components
         self.alpha = alpha
         self.beta = beta
@@ -60,248 +74,201 @@ class NBMFMM(BaseEstimator, TransformerMixin):
         self.tol = tol
         self.W_init = W_init
         self.H_init = H_init
-        self.init = init
+        self.init = init  # For compatibility - currently unused
         self.random_state = random_state
         self.verbose = verbose
+        # Orientation parameter kept for backward compatibility but ignored
+        # Our implementation always follows the paper's beta-dir approach
         self.orientation = orientation
-        self.projection_method = projection_method
-        self.mask_policy = mask_policy
-        self.simplex_normalizer = simplex_normalizer
-        self.n_init = int(n_init)
-        # compat shims
-        self.use_numexpr = use_numexpr
-        self.use_numba = use_numba
-        self.projection_backend = projection_backend
-
-        _validate_toggles(self.mask_policy, self.simplex_normalizer)
+    
+    
+    def fit(self, X, y=None, mask=None):
+        """Fit NBMF model to binary data X."""
+        # Validate input
+        X = check_array(X, accept_sparse='csr', dtype=np.float64)
         
-        # Normalize orientation aliases to canonical forms
-        self.orientation = self._normalize_orientation(self.orientation)
-
-    # ---- Internal helpers ----------------------------------------------------
+        # Handle sparse matrices first
+        if hasattr(X, 'toarray'):  # sparse matrix
+            X = X.toarray()
+            
+        # Check if data is binary or in [0,1]
+        if not np.all((X >= 0) & (X <= 1)):
+            raise ValueError("X must be binary")
+        
+        # Normalize orientation parameter  
+        orientation_normalized = self._normalize_orientation(self.orientation)
+        self.orientation = orientation_normalized  # Store normalized form
+            
+        # Call the solver with paper-correct implementation
+        W, H, losses, time_elapsed, n_iter = nbmf_mm_solver(
+            Y=X,
+            n_components=self.n_components,
+            max_iter=self.max_iter,
+            tol=self.tol,
+            alpha=self.alpha,
+            beta=self.beta,
+            W_init=self.W_init,
+            H_init=self.H_init,
+            mask=mask,
+            random_state=self.random_state,
+            verbose=self.verbose,
+            orientation=orientation_normalized
+        )
+        
+        # Store results
+        self.W_ = W  # Shape (n_samples, n_components), format depends on orientation
+        self.components_ = H  # Shape (n_components, n_features), format depends on orientation
+        self.loss_curve_ = losses
+        self.objective_history_ = losses  # Backward compatibility
+        self.loss_ = losses[-1] if losses else np.inf  # Current loss
+        self.n_iter_ = n_iter
+        self.reconstruction_err_ = losses[-1] if losses else np.inf
+        
+        return self
     
     def _normalize_orientation(self, orientation):
-        """Normalize orientation aliases to canonical forms."""
-        # Convert to lowercase and remove special chars for matching
-        norm = orientation.lower().replace("-", "").replace(" ", "").replace("_", "")
-        
-        # Map aliases to canonical forms
-        alias_map = {
-            # dir-beta aliases
-            "dirbeta": "dir-beta",
-            "aspectbernoulli": "dir-beta",
-            "dirbeta": "dir-beta",
-            # beta-dir aliases  
-            "betadir": "beta-dir",
-            "binaryica": "beta-dir",
-            "bica": "beta-dir",
+        """Normalize orientation parameter to standard form."""
+        # Handle case-insensitive aliases
+        orientation_map = {
+            "beta-dir": "beta-dir",
+            "dir-beta": "dir-beta", 
+            "Beta-Dir": "beta-dir",
+            "Dir-Beta": "dir-beta",
+            "Dir Beta": "dir-beta",
+            "binary ICA": "beta-dir",
+            "Binary ICA": "beta-dir", 
+            "bICA": "beta-dir",
+            "Aspect Bernoulli": "dir-beta"
         }
         
-        if norm in alias_map:
-            return alias_map[norm]
-        elif orientation in ["beta-dir", "dir-beta"]:
-            return orientation
+        if orientation in orientation_map:
+            return orientation_map[orientation]
         else:
-            raise ValueError(f'orientation must be "beta-dir", "dir-beta", or a recognized alias. Got: {orientation}')
-
-    def _fit_beta_dir_single(self, X, mask, random_state):
-        W, H, losses, elapsed, n_iter = nbmf_mm_solver(
-            X, self.n_components,
-            max_iter=self.max_iter, tol=self.tol,
-            alpha=self.alpha, beta=self.beta,
-            W_init=self.W_init, H_init=self.H_init,
-            mask=mask, random_state=random_state, verbose=self.verbose,
-            orientation="beta-dir",
-            mask_policy=self.mask_policy,
-            simplex_normalizer=self.simplex_normalizer,
-            projection_method=self.projection_method,
-        )
-        return W, H, losses, elapsed, n_iter
-
-    def _fit_beta_dir(self, X, mask):
-        # Multi-start (if requested)
-        if self.n_init <= 1:
-            W, H, losses, elapsed, n_iter = self._fit_beta_dir_single(X, mask, self.random_state)
-        else:
-            rng = np.random.default_rng(self.random_state)
-            seeds = rng.integers(1, 2**31 - 1, size=self.n_init)
-            best = None
-            best_loss = np.inf
-            total_time = 0.0
-            for rs in seeds:
-                W_, H_, losses_, elapsed_, n_iter_ = self._fit_beta_dir_single(X, mask, int(rs))
-                total_time += elapsed_
-                if losses_[-1] < best_loss:
-                    best = (W_, H_, losses_, n_iter_)
-                    best_loss = losses_[-1]
-            W, H, losses, n_iter = best
-            elapsed = total_time  # aggregate
-
-        # Persist learned factors (beta-dir orientation)
-        self.components_ = H              # (k, n)
-        self.embedding_ = W               # (m, k)
-        self.W_ = W                       # public alias (tests/README use this)
-        self.n_iter_ = n_iter
-        self.training_time_ = elapsed
-        self.loss_curve_ = losses
-        self._fit_shape = X.shape
+            raise ValueError(f"Unknown orientation: {orientation}. "
+                           f"Must be one of {list(orientation_map.keys())}")
+    
+    def fit_transform(self, X, y=None):
+        """
+        Learn model and return transformed data.
         
-        # Legacy attribute aliases for backward compatibility
-        self.objective_history_ = losses  # alias for loss_curve_
-        
-        # Add reconstruction error (final loss value)
-        self.reconstruction_err_ = losses[-1] if losses else np.nan
-        self.loss_ = losses[-1] if losses else np.nan  # final loss value
-        return self
-
-    def _transform_beta_dir(self, X, mask, n_steps=50, eps=1e-8):
-        # Given fixed H, update W only (beta-dir).
-        X = np.asarray(X, dtype=float)
-        m, n = X.shape
-        k = self.components_.shape[0]
-        H = self.components_
-
-        # Initialize W on simplex
-        rng = np.random.default_rng(self.random_state)
-        W = rng.uniform(0.1, 0.9, size=(m, k))
-        W = np.maximum(W, eps)
-        W = W / (W.sum(axis=1, keepdims=True) + eps)
-
-        M = None if mask is None else (mask.toarray() if hasattr(mask, "toarray") else np.asarray(mask))
-
-        # Run a few multiplicative steps for W with fixed H
-        Wk = W.T  # (k, m)
-        for _ in range(n_steps):
-            Y = X
-            Mloc = np.ones_like(Y) if M is None else M
-            Y_pos = Y * Mloc
-            if self.mask_policy == "magron2022-legacy":
-                Y_neg = 1.0 - Y_pos
-            else:
-                Y_neg = (1.0 - Y) * Mloc
-
-            HW_T = H.T @ Wk
-            Wk = Wk * (
-                H @ (Y_pos.T / (HW_T + eps)) +
-                (1.0 - H) @ (Y_neg.T / (1.0 - HW_T + eps))
-            )
-
-            if self.projection_method == "duchi":
-                # Project columns to simplex
-                k_, m_ = Wk.shape
-                for j in range(m_):
-                    v = Wk[:, j]
-                    u = np.sort(v)[::-1]
-                    cssv = np.cumsum(u)
-                    rho = np.nonzero(u * (np.arange(k_) + 1) > (cssv - 1))[0][-1]
-                    theta = (cssv[rho] - 1.0) / float(rho + 1)
-                    Wk[:, j] = np.maximum(v - theta, 0.0)
-            else:
-                # MM-exact normalizer path
-                if self.simplex_normalizer == "magron2022-legacy":
-                    Wk = Wk / float(n)
-                else:
-                    obs_counts = Mloc.sum(axis=1)
-                    obs_counts = np.maximum(obs_counts, 1.0)
-                    Wk = Wk / obs_counts[np.newaxis, :]
-
-            Wk = Wk / (Wk.sum(axis=0, keepdims=True) + eps)
-
-        return Wk.T
-
-    # ---- sklearn API ---------------------------------------------------------
-
-    def fit(self, X, y=None, mask=None):
-        X = check_array(X, accept_sparse=True, dtype=float, order="C")
-        # Convert sparse to dense for internal processing
-        if hasattr(X, "toarray"):
-            X = X.toarray()
-        if self.orientation == "beta-dir":
-            return self._fit_beta_dir(X, mask)
-        elif self.orientation == "dir-beta":
-            # symmetric formulation: fit on transposed data, then swap roles
-            self._fit_beta_dir(X.T, None if mask is None else mask.T)
-            # After fitting on X.T:
-            #   embedding_ (on X.T) has shape (n, k)
-            #   components_ (on X.T) has shape (k, m)
-            # For dir-beta on X:
-            #   W (continuous) := components_.T (m, k)
-            #   H (simplex cols) := embedding_.T   (k, n)
-            W_cont = self.components_.T
-            H_simplex_cols = self.embedding_.T
-            self.embedding_ = W_cont
-            self.components_ = H_simplex_cols
-            self.W_ = self.embedding_
-            self._fit_shape = X.shape
+        Parameters
+        ----------
+        X : array-like, shape (n_samples, n_features)
+            Data matrix
             
-            # Legacy attribute aliases for backward compatibility
-            self.objective_history_ = self.loss_curve_  # alias for loss_curve_
-            self.reconstruction_err_ = self.loss_curve_[-1] if self.loss_curve_ else np.nan
-            self.loss_ = self.loss_curve_[-1] if self.loss_curve_ else np.nan
-            return self
-        else:
-            raise ValueError('orientation must be "beta-dir" or "dir-beta"')
-
+        Returns
+        -------
+        W : array-like, shape (n_samples, n_components)
+            Transformed data
+        """
+        self.fit(X)
+        return self.W_
+    
     def transform(self, X, mask=None):
-        if not hasattr(self, "components_"):
-            raise AttributeError("Model is not fitted yet.")
-        X = check_array(X, accept_sparse=True, dtype=float, order="C")
-        # Convert sparse to dense for internal processing
-        if hasattr(X, "toarray"):
+        """Transform X by finding W given fixed H."""
+        check_is_fitted(self, ['components_'])
+        X = check_array(X, accept_sparse='csr', dtype=np.float64)
+        
+        if hasattr(X, 'toarray'):  # sparse matrix
             X = X.toarray()
-        if self.orientation == "beta-dir":
-            return self._transform_beta_dir(X, mask)
-        elif self.orientation == "dir-beta":
-            # For dir-beta: we need to transform X to get W (continuous factors)
-            # The components_ are H with simplex columns, embedding_ is W (continuous)
-            # We need to solve for W given H and X, but this is complex for dir-beta
-            # For now, just use a simple approximation
-            return self.embedding_  # Return the stored W from fitting
-        else:
-            raise NotImplementedError(f"transform not implemented for orientation='{self.orientation}'")
-
+            
+        m = X.shape[0]
+        k = self.n_components
+        H = self.components_
+        
+        # Initialize W randomly
+        W = np.random.uniform(0.1, 0.9, (m, k))
+        
+        # Run a few iterations to find W given fixed H
+        for _ in range(50):
+            # Same W update as in fit, but with fixed H
+            W_T = W.T
+            HW_T = H.T @ W_T
+            
+            if mask is None:
+                Y_T = X.T
+                OneminusY_T = (1 - X).T
+            else:
+                Y_T = X.T * mask.T
+                OneminusY_T = (1 - X).T * mask.T
+                
+            W_T = W_T * (H @ (Y_T / (HW_T + 1e-8)) + (1 - H) @ (OneminusY_T / (1 - HW_T + 1e-8)))
+            W_T = W_T / X.shape[1]
+            W_T = W_T / W_T.sum(axis=0, keepdims=True)
+            W = W_T.T
+            
+        # Ensure W stays in bounds
+        W = np.clip(W, 1e-8, 1.0)
+        # Re-normalize rows to sum to 1 after clipping
+        W = W / W.sum(axis=1, keepdims=True)
+        return W
+    
     def inverse_transform(self, W):
-        if not hasattr(self, "components_"):
-            raise AttributeError("Model is not fitted yet.")
-        return np.dot(W, self.components_)
-
+        """Transform W back to data space."""
+        check_is_fitted(self, ['components_'])
+        W = check_array(W, dtype=np.float64)
+        
+        # Compute reconstruction
+        # Note: W has rows summing to 1, H is in (0, 1)
+        reconstruction = W @ self.components_
+        # Ensure reconstruction stays in [0, 1]
+        return np.clip(reconstruction, 0.0, 1.0)
+    
     def score(self, X, mask=None):
-        """Average log-likelihood per observed entry (nats)."""
-        if not hasattr(self, "components_"):
-            raise AttributeError("Model is not fitted yet.")
-        X = check_array(X, accept_sparse=True, dtype=float, order="C")
-        # Convert sparse to dense for internal processing
-        if hasattr(X, "toarray"):
+        """
+        Compute the average log-likelihood per observed entry.
+        
+        Parameters
+        ----------
+        X : array-like, shape (n_samples, n_features)
+            Data matrix
+        mask : array-like, optional
+            Binary mask for observed entries
+            
+        Returns
+        -------
+        score : float
+            Average log-likelihood per observed entry
+        """
+        check_is_fitted(self, ['components_'])
+        X = check_array(X, accept_sparse='csr', dtype=np.float64)
+        
+        if hasattr(X, 'toarray'):  # sparse matrix
             X = X.toarray()
-        # Use training W if this is the training matrix; otherwise compute W on the fly
-        if hasattr(self, "_fit_shape") and X.shape == self._fit_shape:
-            W = self.embedding_
-        else:
-            # Fall back to a small number of W updates
-            W = self.transform(X, mask=mask)
-        X_hat = self.inverse_transform(W)
+            
+        # Get reconstruction
+        X_recon = self.inverse_transform(self.transform(X))
+        
+        # Compute log-likelihood
         eps = 1e-8
         if mask is None:
-            log_term = X * np.log(X_hat + eps) + (1.0 - X) * np.log(1.0 - X_hat + eps)
+            log_lik = X * np.log(X_recon + eps) + (1 - X) * np.log(1 - X_recon + eps)
             n_obs = X.size
         else:
-            M = mask.toarray() if hasattr(mask, "toarray") else np.asarray(mask)
-            log_term = M * (X * np.log(X_hat + eps) + (1.0 - X) * np.log(1.0 - X_hat + eps))
-            n_obs = int(np.count_nonzero(M))
-        return float(np.sum(log_term)) / float(max(n_obs, 1))
-
-    def perplexity(self, X, mask=None, use_magron2022_legacy: bool = False):
+            X_masked = X * mask
+            log_lik = X_masked * np.log(X_recon + eps) + (1 - X_masked) * np.log(1 - X_recon + eps)
+            n_obs = np.count_nonzero(mask)
+            
+        return np.sum(log_lik) / n_obs
+    
+    def perplexity(self, X, mask=None):
         """
-        Traditional perplexity = exp(-average NLL per observed entry).
-
-        If use_magron2022_legacy is True, return the *average NLL per observed entry* (nats)
-        to mirror the magron2022 research scripts' get_perplexity function definition.
-        """
-        avg_loglik = self.score(X, mask=mask)           # average log-likelihood per observed entry
-        if use_magron2022_legacy:
-            return float(-avg_loglik)                   # matches Magron's "perplexity" number
-        return float(np.exp(-avg_loglik))               # textbook perplexity
+        Compute perplexity of the model on X.
         
+        Parameters
+        ----------
+        X : array-like, shape (n_samples, n_features)
+            Data matrix
+        mask : array-like, optional
+            Binary mask for observed entries
+            
+        Returns
+        -------
+        perplexity : float
+            Perplexity value
+        """
+        return np.exp(-self.score(X, mask))
 
-# Proper public alias
+
+# Alias for backwards compatibility
 NBMF = NBMFMM
