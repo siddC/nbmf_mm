@@ -139,7 +139,7 @@ def nbmf_mm_solver(
 
     Y = np.asarray(Y, dtype=float)
     if np.any((Y < 0) | (Y > 1)):
-        raise ValueError("Y must be in [0, 1].")
+        raise ValueError("Y must be binary (values in [0, 1]).")
     m, n = Y.shape
     k = int(n_components)
     M = None if mask is None else (_ensure_array(mask))
