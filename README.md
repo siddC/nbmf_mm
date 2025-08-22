@@ -1,4 +1,4 @@
-# nbmf‑mm — Mean‑parameterized Bernoulli NMF via Majorization–Minimization
+# nbmf‑mm — Bernoulli mean‑parameterized NBMF via Majorization–Minimization
 
 [![CI](https://github.com/siddC/nbmf_mm/actions/workflows/ci.yml/badge.svg)](https://github.com/siddC/nbmf_mm/actions/workflows/ci.yml)
 [![PyPI version](https://img.shields.io/pypi/v/nbmf-mm.svg)](https://pypi.org/project/nbmf-mm/)
@@ -119,21 +119,31 @@ Both solve the same mean-parameterized factorization with symmetric geometric co
 
 ### Masking semantics and legacy parity
 
-By default, only **observed entries** contribute to both the `y` and `(1 - y)` terms of the Bernoulli likelihood, and
-the simplex step divides by the **number of observed entries** (per row/column) so the simplex is preserved under masking.
+By default, only **observed entries** contribute to both the `y` and `(1 - y)` terms of the Bernoulli likelihood, and the simplex step divides by the **number of observed entries** (per row/column) so the simplex is preserved under masking.
 This is the paper-correct masked MM.
 
 Some research scripts for NBMF-MM pre-mask `Y` and then use `(1 - Y)` **without** reapplying the mask during the **H**
 update. This effectively treats **missing entries as negatives** in the `(1 - y)` term. They also divide the **W** update
-by the global number of features `n` even under masking. We expose both behaviors via two toggles:
+by the global number of features `n` even under masking. We expose both behaviors via two toggles, the "paper-correct" default that follows the original algorithm from the peer-reviewed, published manuscript:
 
 ```python
-NBMFMM(
+NBMF(
     ...,
     mask_policy="observed-only",          # default (paper-correct)
     simplex_normalizer="observed-count",   # default (paper-correct)
 )
+```
 
+and the "research-code-parity" option that follows the code used in the Magon2022 GitHub replication scripts:
+
+```python
+NBMF(
+    ...,
+    mask_policy="magron2022-legacy",
+    simplex_normalizer="magron2022-legacy",
+)
+
+```
 ---
 
 ## API Hightlihts
