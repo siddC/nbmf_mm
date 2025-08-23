@@ -83,11 +83,12 @@ all-r = [
 ]
 
 [tool.setuptools.packages.find]
+where = ["src"]
 include = ["nbmf_mm*"]
 
 [tool.setuptools_scm]
 # create a file so editable installs can read __version__ without metadata
-write_to = "nbmf_mm/_version.py"
+write_to = "src/nbmf_mm/_version.py"
 version_scheme = "no-guess-dev"
 local_scheme = "no-local-version"
 fallback_version = "0.0.0"
