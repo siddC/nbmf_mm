@@ -177,11 +177,40 @@ def nbmf_mm_solver(
     # Convert back to external notation
     W_final = W.T  # Shape (m, k)
     H_final = H   # Shape (k, n)
-    
+
     # Handle orientation output
     if orientation == "dir-beta":
         # Transpose back for dir-beta
         W_final, H_final = H_final.T, W_final.T
-    
+
+    # ------------------------------------------------------------------
+    # Enforce simplex on the appropriate factor within small tolerance.
+    # - beta-dir: rows of W should sum to 1
+    # - dir-beta: columns of H should sum to 1
+    # We renormalize only if deviation exceeds a tiny tolerance.
+    # ------------------------------------------------------------------
+    eps = 1e-12
+    tol = 1e-9
+
+    if orientation == "beta-dir":
+        # Ensure W rows sum to 1
+        if W_final.size:
+            row_sums = W_final.sum(axis=1, keepdims=True)
+            dev = np.max(np.abs(row_sums - 1.0)) if row_sums.size else 0.0
+            if np.isfinite(dev) and (dev > tol):
+                safe = (row_sums > eps)
+                # Avoid divide-by-zero; leave degenerate rows untouched
+                if np.any(safe):
+                    W_final[safe.ravel(), :] = W_final[safe.ravel(), :] / row_sums[safe]
+    else:  # dir-beta
+        # Ensure H columns sum to 1
+        if H_final.size:
+            col_sums = H_final.sum(axis=0, keepdims=True)
+            dev = np.max(np.abs(col_sums - 1.0)) if col_sums.size else 0.0
+            if np.isfinite(dev) and (dev > tol):
+                safe = (col_sums > eps)
+                if np.any(safe):
+                    H_final[:, safe.ravel()] = H_final[:, safe.ravel()] / col_sums[:, safe.ravel()]
+
     n_iter = iteration + 1
     return W_final, H_final, losses, 0.0, n_iter
