@@ -35,8 +35,8 @@ def _mask_views(
 
 def nbmf_mm_update_beta_dir(
     Y: np.ndarray,
-    W: np.ndarray,  # shape (k, m) ; columns sum to 1 (Dirichlet on rows of external W)
-    H: np.ndarray,  # shape (k, n) ; entries in (0,1) (Beta prior)
+    W: np.ndarray,  # shape (k, m); columns sum to 1 (Dirichlet on rows of external W)
+    H: np.ndarray,  # shape (k, n); entries in (0,1) (Beta prior)
     mask: Optional[np.ndarray],
     alpha: float,
     beta: float,
@@ -47,10 +47,9 @@ def nbmf_mm_update_beta_dir(
       - W columns (internal) sum to 1  <=> rows of external W on the simplex
       - H is Beta-distributed in (0,1)
 
-    This is the masked extension of Magron & Févotte (2022), Alg. 1:
-    - Replace Y by Y_obs = Y * mask and (1-Y) by Z_obs = (1-Y) * mask
-    - Preserve the simplex with a per-column Lagrange normalization (λ),
-      which reduces to a constant N only in the fully-observed case.
+    Masked extension of Magron & Févotte (2022), Alg. 1:
+      - Replace Y by Y_obs = Y * mask and (1-Y) by Z_obs = (1-Y) * mask
+      - Preserve the simplex with per-column Lagrange normalization (λ)
     """
     # Observed positives/negatives and their transposes
     Y_obs, Z_obs, Y_T, Z_T = _mask_views(Y, mask)
@@ -128,7 +127,7 @@ def nbmf_mm_solver(
     m, n = Y.shape
     k = n_components
 
-    # Handle orientation by transposing if needed
+    # Handle orientation by transposing if needed.
     # Internally we always solve the Beta-Dir case (simplex on internal W).
     transposed = (orientation == "dir-beta")
     if transposed:
@@ -197,7 +196,7 @@ def nbmf_mm_solver(
         # dir-beta: swap back
         W_ext, H_ext = H_ext.T, W_ext.T  # W continuous, H columns simplex externally
 
-    # Final tiny safeguard (should be already exact to ~1e-12)
+    # Final tiny safeguard (should already be exact to ~1e-12)
     if orientation == "beta-dir":
         # rows of W sum to 1
         s = W_ext.sum(axis=1, keepdims=True)

@@ -3,16 +3,17 @@ from typing import Optional
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils import check_array
+
 from ._solver import nbmf_mm_solver
 from ._utils import check_is_fitted
 
 
 class NBMFMM(BaseEstimator, TransformerMixin):
     """
-    Nonnegative Binary Matrix Factorization via Majorization-Minimization.
+    Nonnegative Binary Matrix Factorization via Majorization–Minimization.
 
-    Implements the NBMF-MM algorithm from:
-      P. Magron & C. Févotte (2022), “A Majorization-Minimization Algorithm for
+    Implements the NBMF–MM algorithm from:
+      P. Magron & C. Févotte (2022), “A Majorization–Minimization Algorithm for
       Nonnegative Binary Matrix Factorization,” IEEE SPL.
 
     Parameters
@@ -28,8 +29,8 @@ class NBMFMM(BaseEstimator, TransformerMixin):
     random_state : int or None, default=None
     verbose : int, default=0
     orientation : {"beta-dir","dir-beta"}, default="beta-dir"
-        - "beta-dir"  (Binary ICA):      W rows simplex, H ∈ (0,1)
-        - "dir-beta"  (Aspect Bernoulli): W ∈ (0,1),   H columns simplex
+        - "beta-dir"  (Binary ICA):       W rows simplex, H ∈ (0,1)
+        - "dir-beta"  (Aspect Bernoulli): W ∈ (0,1),     H columns simplex
     """
 
     def __init__(
@@ -61,7 +62,7 @@ class NBMFMM(BaseEstimator, TransformerMixin):
     # ------------------------------ API ---------------------------------
 
     def fit(self, X, y=None, mask=None):
-        """Fit NBMF-MM to binary (or [0,1]) data X."""
+        """Fit NBMF–MM to binary (or [0,1]) data X."""
         X = check_array(X, accept_sparse="csr", dtype=np.float64)
         if hasattr(X, "toarray"):  # sparse
             X = X.toarray()
@@ -104,9 +105,10 @@ class NBMFMM(BaseEstimator, TransformerMixin):
         Given fixed H, estimate W for new data X.
 
         - In "beta-dir" mode (Binary ICA), W rows lie on the simplex.
-          We enforce this with the same λ-normalized update used in fit.
+          We enforce this with the same λ-normalized update used in fit,
+          starting from a simplex-initialized W to keep WH in [0,1].
         - In "dir-beta" mode (Aspect Bernoulli), W has Beta entries in (0,1);
-          we DO NOT project W to a simplex.
+          we do not project W to a simplex.
         """
         check_is_fitted(self, ["components_"])
         X = check_array(X, accept_sparse="csr", dtype=np.float64)
@@ -117,9 +119,16 @@ class NBMFMM(BaseEstimator, TransformerMixin):
         k = self.n_components
         H = self.components_
 
-        # init W in (0,1)
-        W = np.random.uniform(0.1, 0.9, size=(m, k))
         eps = 1e-8
+
+        # Initialize W
+        if self.orientation == "beta-dir":
+            # Simplex init prevents negative denominators in the first step
+            W = np.random.rand(m, k)
+            W = W / (W.sum(axis=1, keepdims=True) + eps)
+        else:
+            # Beta entries in (0,1)
+            W = np.random.uniform(0.1, 0.9, size=(m, k))
 
         # Build masked views once
         if mask is not None and hasattr(mask, "toarray"):
@@ -135,7 +144,7 @@ class NBMFMM(BaseEstimator, TransformerMixin):
             Y_T = Y_obs.T
             Z_T = Z_obs.T
 
-        # iterate a few steps
+        # Iterate a few steps
         for _ in range(n_iter):
             W_T = W.T  # (k, m)
             HW_T = H.T @ W_T  # (n, m)
@@ -148,8 +157,7 @@ class NBMFMM(BaseEstimator, TransformerMixin):
                 W_T = W_raw / (lam + eps)
                 W = W_T.T  # rows sum to 1 after transpose
             else:
-                # "dir-beta": W is Beta - elementwise update in (0,1), no simplex
-                # Symmetric to the H-update used in fit.
+                # "dir-beta": W is Beta – elementwise update in (0,1), no simplex
                 A = (self.alpha - 1.0)
                 B = (self.beta - 1.0)
                 num_W = W_T * (H @ (Y_T / (HW_T + eps))) + A
@@ -161,7 +169,7 @@ class NBMFMM(BaseEstimator, TransformerMixin):
         # Final guardrails
         if self.orientation == "beta-dir":
             s = W.sum(axis=1, keepdims=True)
-            W = W / (s + eps)  # rows sum to 1
+            W = W / (s + eps)  # rows sum to 1 (non-negative)
         else:
             W = np.clip(W, eps, 1.0 - eps)
 
@@ -175,12 +183,15 @@ class NBMFMM(BaseEstimator, TransformerMixin):
         return np.clip(Xhat, 0.0, 1.0)
 
     def score(self, X, mask=None):
-        """Average log-likelihood per observed entry."""
+        """
+        Average log-likelihood per observed entry (higher is better, ≤ 0).
+        """
         check_is_fitted(self, ["components_"])
         X = check_array(X, accept_sparse="csr", dtype=np.float64)
         if hasattr(X, "toarray"):
             X = X.toarray()
 
+        # Predict probabilities
         Xhat = self.inverse_transform(self.transform(X, mask=mask, n_iter=10))
         eps = 1e-8
 
@@ -198,6 +209,15 @@ class NBMFMM(BaseEstimator, TransformerMixin):
 
         log_lik = Y_obs * np.log(Xhat + eps) + Z_obs * np.log(1.0 - Xhat + eps)
         return float(np.sum(log_lik) / max(n_obs, 1))
+
+    def perplexity(self, X, mask=None):
+        """
+        Perplexity = exp(- average log-likelihood per observed entry).
+        Lower is better; minimum is 1.0 when predictions are perfect.
+        """
+        s = self.score(X, mask=mask)
+        # score is ≤ 0, so perplexity ≥ 1
+        return float(np.exp(-s))
 
     # -------------------------- helpers ---------------------------------
 
